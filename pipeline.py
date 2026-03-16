@@ -259,11 +259,8 @@ class InferencePipeline:
         enc = self.vae_encoder.predict(self._enc_input)
         clean = np.asarray(enc["latent"])  # (1, 4, 32, 32) float32
 
-        # Upsample 32x32 → 64x64 for UNet (nearest-neighbor via strided assignment)
-        self._unet_sample[:, :, 0::2, 0::2] = clean
-        self._unet_sample[:, :, 1::2, 0::2] = clean
-        self._unet_sample[:, :, 0::2, 1::2] = clean
-        self._unet_sample[:, :, 1::2, 1::2] = clean
+        # Upsample 32x32 → 64x64 for UNet (np.repeat: single C call, better cache)
+        np.copyto(self._unet_sample, np.repeat(np.repeat(clean, 2, axis=2), 2, axis=3))
 
         # Add noise at 64x64 scale
         np.multiply(self._sqrt_a, self._unet_sample, out=self._unet_sample)
