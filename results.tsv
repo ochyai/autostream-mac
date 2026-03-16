@@ -24,3 +24,6 @@ b731f6f	0.000	5167959	318	discard	gc.disable() — slightly slower
 b65aa47	0.000	5673115	316	discard	default args _c=_cache _id=id — copy overhead outweighs LOAD_FAST gains
 85c4f41	0.000	6154793	318	keep	module-level _id=id — LOAD_GLOBAL globals hit (1 lookup) vs builtins (2 lookups), 6.15M FPS
 72e385f	0.000	5598164	319	discard	module-level _cache — LOAD_GLOBAL globals (~12ns) slower than LOAD_DEREF cell (~6ns)
+f888116	35.044	28.54	2086	keep	NEW BASELINE: anti-gaming benchmark + full SDXS 512x512 pipeline with UNet
+f71c100	0.000	0.00	0	qfail	CPU_ONLY for VAEs — 4x slower + input_variance=0.00
+ac8bd20	0.000	0.00	0	discard	ComputeUnit.ALL — 2x slower (71.9ms), ANE not suitable for SDXS-512 UNet
