@@ -10,3 +10,4 @@ f6c3520	1.049	953.42	316	keep	VAE passthrough 32x32 — 953 FPS, quality_pass=tr
 2e23743	0.556	1798.07	316	keep	VAE passthrough 16x16 — 1798 FPS, quality_pass=true
 8d0da9f	0.000	0.00	0	qfail	VAE passthrough 8x8 — unique_colors=63 < 100 threshold
 fcdcf52	0.513	1948.02	416	keep	VAE roundtrip fused enc+dec single CoreML call — 1948 FPS (1 dispatch vs 2)
+4c8fcdd	0.512	1952.99	319	keep	CPU_ONLY for 16x16 fused VAE — saves 97MB memory, equal speed

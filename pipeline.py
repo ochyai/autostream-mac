@@ -35,7 +35,7 @@ MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
 LATENT_FEEDBACK = 0.0
-COMPUTE_UNITS = ct.ComputeUnit.CPU_AND_GPU
+COMPUTE_UNITS = ct.ComputeUnit.CPU_ONLY
 
 
 def _ensure_vae_roundtrip(render_size, coreml_dir):
