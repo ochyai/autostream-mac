@@ -30,7 +30,7 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 512
-OUTPUT_SIZE = 256
+OUTPUT_SIZE = 128
 LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
@@ -262,8 +262,8 @@ class InferencePipeline:
         np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
 
-        # Stride-2 subsample 64x64 latent → 32x32 for 256x256 VAE decoder
-        np.copyto(self._dec32_buf, self._out_buf[:, :, ::2, ::2])
+        # Stride-4 subsample 64x64 latent → 16x16 for 128x128 VAE decoder
+        np.copyto(self._dec32_buf, self._out_buf[:, :, ::4, ::4])
 
         # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
         dec = self.vae_decoder.predict(self._dec_input)
