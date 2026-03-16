@@ -31,7 +31,7 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 8         # Encode/decode at 8x8 (1x1 latent, minimum TAESD size)
 OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
-UNET_LATENT_SIZE = 2    # UNet at 2x2 (minimum supported)
+UNET_LATENT_SIZE = 1    # UNet at 1x1 (absolute minimum)
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
