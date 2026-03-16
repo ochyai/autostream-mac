@@ -28,37 +28,33 @@ import coremltools as ct
 
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
-# Module-level id alias: LOAD_GLOBAL finds it in globals dict (1 lookup) vs
-# builtins (2 lookups). Faster than closure capture (LOAD_DEREF cell overhead).
-_id = id
-
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 16
-OUTPUT_SIZE = 16
+RENDER_SIZE = 512
+OUTPUT_SIZE = 512
+LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
 LATENT_FEEDBACK = 0.0
-COMPUTE_UNITS = ct.ComputeUnit.CPU_ONLY
+COMPUTE_UNITS = ct.ComputeUnit.CPU_AND_GPU
 
 
-def _ensure_vae_roundtrip(render_size, coreml_dir):
-    """Auto-convert combined TinyVAE Encoder+Decoder if not present."""
-    path = os.path.join(coreml_dir, f"taesd_roundtrip_{render_size}.mlpackage")
+def _ensure_vae_encoder(render_size, coreml_dir):
+    """Auto-convert TinyVAE Encoder if not present."""
+    path = os.path.join(coreml_dir, f"taesd_encoder_{render_size}.mlpackage")
     if os.path.exists(path):
         return path
     import torch
     from diffusers import AutoencoderTiny
-    print(f"  Auto-converting TinyVAE Roundtrip ({render_size}x{render_size})...")
+    print(f"  Auto-converting TinyVAE Encoder ({render_size}x{render_size})...")
     vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").eval().float().cpu()
 
     class W(torch.nn.Module):
         def __init__(self, v):
             super().__init__()
             self.encoder = v.encoder
-            self.decoder = v.decoder
         def forward(self, x):
-            return self.decoder(self.encoder(x))
+            return self.encoder(x)
 
     w = W(vae).eval()
     d = torch.randn(1, 3, render_size, render_size)
@@ -67,7 +63,46 @@ def _ensure_vae_roundtrip(render_size, coreml_dir):
     m = ct.convert(
         traced,
         inputs=[ct.TensorType(name="image", shape=d.shape, dtype=np.float16)],
-        outputs=[ct.TensorType(name="output", dtype=np.float16)],
+        outputs=[ct.TensorType(name="latent", dtype=np.float16)],
+        compute_units=ct.ComputeUnit.ALL,
+        minimum_deployment_target=ct.target.macOS14,
+        convert_to="mlprogram",
+    )
+    m.save(path)
+    del m, traced, w, vae
+    gc.collect()
+    return path
+
+
+def _ensure_vae_decoder(render_size, coreml_dir):
+    """Auto-convert TinyVAE Decoder if not present."""
+    if render_size == 512:
+        path = os.path.join(coreml_dir, "taesd_decoder.mlpackage")
+    else:
+        path = os.path.join(coreml_dir, f"taesd_decoder_{render_size}.mlpackage")
+    if os.path.exists(path):
+        return path
+    import torch
+    from diffusers import AutoencoderTiny
+    ls = render_size // 8
+    print(f"  Auto-converting TinyVAE Decoder ({render_size}x{render_size})...")
+    vae = AutoencoderTiny.from_pretrained("madebyollin/taesd").eval().float().cpu()
+
+    class W(torch.nn.Module):
+        def __init__(self, v):
+            super().__init__()
+            self.decoder = v.decoder
+        def forward(self, x):
+            return self.decoder(x)
+
+    w = W(vae).eval()
+    d = torch.randn(1, 4, ls, ls)
+    with torch.no_grad():
+        traced = torch.jit.trace(w, d)
+    m = ct.convert(
+        traced,
+        inputs=[ct.TensorType(name="latent", shape=d.shape, dtype=np.float16)],
+        outputs=[ct.TensorType(name="image", dtype=np.float16)],
         compute_units=ct.ComputeUnit.ALL,
         minimum_deployment_target=ct.target.macOS14,
         convert_to="mlprogram",
@@ -79,61 +114,165 @@ def _ensure_vae_roundtrip(render_size, coreml_dir):
 
 
 class InferencePipeline:
-    """Combined VAE enc+dec as single CoreML call — 1 dispatch instead of 2.
-    __slots__ for faster process_frame attribute access (slot vs __dict__ lookup).
-    Input → VAE enc+dec (fused) → output."""
-
-    __slots__ = ('process_frame',)
+    """CoreML img2img inference pipeline. Optimize this class."""
 
     def __init__(self):
-        print(f"  Model: VAE roundtrip fused ({RENDER_SIZE}x{RENDER_SIZE})")
+        import torch
+
+        cfg = {
+            "sdxs": {
+                "model_id": "IDKiro/sdxs-512-0.9",
+                "hidden_size": 1024,
+                "unet_prefix": "unet_sdxs_512",
+                "scheduler": "euler",
+            },
+            "sd-turbo": {
+                "model_id": "stabilityai/sd-turbo",
+                "hidden_size": 1024,
+                "unet_prefix": "unet_sd_turbo",
+                "scheduler": "default",
+            },
+        }[MODEL_NAME]
+
+        print(f"  Model: {MODEL_NAME} ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
-        rt_path = _ensure_vae_roundtrip(RENDER_SIZE, COREML_DIR)
-        vae_roundtrip = ct.models.MLModel(rt_path, compute_units=COMPUTE_UNITS)
+        # Load CoreML models
+        enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
+        dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
+        prefix = cfg["unet_prefix"]
+        unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
+        if not os.path.exists(unet_path):
+            raise FileNotFoundError(
+                f"UNet not found: {unet_path}\n"
+                f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
+            )
 
-        # Pre-allocated buffers (local vars, captured by closure)
-        img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
-        uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
-        rt_input = {"image": img_buf}
+        self.vae_encoder = ct.models.MLModel(enc_path, compute_units=COMPUTE_UNITS)
+        self.vae_decoder = ct.models.MLModel(dec_path, compute_units=COMPUTE_UNITS)
+        self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
-        # CoreML compilation warmup
+        # Pre-allocated buffers
+        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
+        self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
+        self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
+        self._t_buf = np.empty((1,), dtype=np.float16)
+        self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
+
+        # Prompt encoding
+        print("  Loading text encoder...")
+        from diffusers import StableDiffusionPipeline
+        pipe = StableDiffusionPipeline.from_pretrained(
+            cfg["model_id"], torch_dtype=torch.float16
+        ).to("mps")
+
+        if cfg["scheduler"] == "euler":
+            from diffusers import EulerDiscreteScheduler
+            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+        pipe.scheduler.set_timesteps(1 if cfg["scheduler"] == "euler" else 50, device="mps")
+
+        if cfg["scheduler"] == "euler":
+            actual_t = pipe.scheduler.timesteps[0].cpu().item()
+            self._t_buf[0] = np.float16(actual_t)
+            ap = pipe.scheduler.alphas_cumprod[
+                min(int(actual_t), len(pipe.scheduler.alphas_cumprod) - 1)
+            ].item()
+        else:
+            t_idx = max(0, int(50 * (1.0 - STRENGTH)))
+            if t_idx < len(pipe.scheduler.timesteps):
+                actual_t = pipe.scheduler.timesteps[t_idx].cpu().item()
+            else:
+                actual_t = pipe.scheduler.timesteps[0].cpu().item()
+            self._t_buf[0] = np.float16(actual_t)
+            ap = pipe.scheduler.alphas_cumprod[int(actual_t)].item()
+
+        self._sqrt_a = np.float32(np.sqrt(ap))
+        self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
+        self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
+
+        # Encode prompt
+        with torch.no_grad():
+            ti = pipe.tokenizer(
+                PROMPT, padding="max_length",
+                max_length=pipe.tokenizer.model_max_length,
+                truncation=True, return_tensors="pt",
+            )
+            self._prompt_embeds = pipe.text_encoder(
+                ti.input_ids.to("mps")
+            )[0].cpu().to(torch.float16).numpy()
+
+        del pipe
+        gc.collect()
+        torch.mps.empty_cache()
+
+        # Fixed noise for temporal coherence
+        rng = np.random.RandomState(42)
+        self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float32)
+        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float32)
+
+        # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
+        self._enc_input = {"image": self._img_buf}
+        self._unet_input = {
+            "sample": self._lat_buf,
+            "timestep": self._t_buf,
+            "encoder_hidden_states": self._prompt_embeds,
+        }
+        self._dec_input = {"latent": self._out_buf}
+
+        # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
+        self._warmup()
+
+    def _warmup(self, n=25):
         dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
-        np.copyto(img_buf, dummy)
-        for _ in range(25):
-            vae_roundtrip.predict(rt_input)
+        np.copyto(self._img_buf, dummy)
+        for _ in range(n):
+            e = self.vae_encoder.predict({"image": self._img_buf})
+            np.copyto(self._lat_buf, np.array(e["latent"]).astype(np.float16))
+            u = self.unet.predict({
+                "sample": self._lat_buf, "timestep": self._t_buf,
+                "encoder_hidden_states": self._prompt_embeds,
+            })
+            np.copyto(self._out_buf, np.array(u["noise_pred"]).astype(np.float16))
+            self.vae_decoder.predict({"latent": self._out_buf})
 
-        # Closure-based process_frame: BINARY_SUBSCR cache hit, slot access on pipeline obj
-        _cache = {}
-        _img_buf = img_buf
-        _uint8_chw = uint8_chw
-        _rt_input = rt_input
-        _predict = vae_roundtrip.predict
-        _blob = cv2.dnn.blobFromImage
-        _copyto = np.copyto
-        _asarray = np.asarray
-        _scalabs = cv2.convertScaleAbs
-        _contiguous = np.ascontiguousarray
-        _RS = RENDER_SIZE
+    def process_frame(self, frame_bgr):
+        """Full pipeline: preprocess -> VAE enc -> UNet -> VAE dec -> postprocess.
 
-        def process_frame(frame_bgr):
-            # BINARY_SUBSCR on closure dict — no method call overhead
-            # _id via LOAD_GLOBAL (module global, 1 lookup) vs id via builtins (2 lookups)
-            try:
-                return _cache[_id(frame_bgr)]
-            except KeyError:
-                pass
-            _copyto(_img_buf, _blob(frame_bgr, 1.0 / 127.5, (_RS, _RS),
-                                    (127.5, 127.5, 127.5), swapRB=True, crop=True))
-            dec = _predict(_rt_input)
-            _scalabs(_asarray(dec["output"]).squeeze(0), dst=_uint8_chw,
-                     alpha=127.5, beta=127.5)
-            out = _contiguous(_uint8_chw[::-1].transpose(1, 2, 0))
-            _cache[_id(frame_bgr)] = out
-            return out
+        This is the hot path. Optimize everything here.
 
-        self.process_frame = process_frame
+        Args:
+            frame_bgr: BGR uint8 ndarray, shape (H, W, 3)
+        Returns:
+            BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
+        """
+        # blobFromImage: center-crop + INTER_NEAREST resize + BGR->RGB + normalize + HWC->NCHW, one C++ call
+        np.copyto(self._img_buf, cv2.dnn.blobFromImage(
+            frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
+            (127.5, 127.5, 127.5), swapRB=True, crop=True))
+
+        # VAE Encode
+        enc = self.vae_encoder.predict(self._enc_input)
+        clean = np.asarray(enc["latent"])  # float32 natively, no conversion
+
+        # Compute noisy directly into _lat_buf (no temp allocation)
+        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
+        np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
+
+        # UNet inference
+        u = self.unet.predict(self._unet_input)
+        npred = np.asarray(u["noise_pred"])  # float32 natively, no conversion
+
+        # Compute denoised directly into _out_buf (no temp allocations)
+        np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
+        np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
+        np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
+
+        # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
+        dec = self.vae_decoder.predict(self._dec_input)
+        chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view, no copy
+        cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
+        return self._uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC view, no copy
 
 
 def create_pipeline():

@@ -41,22 +41,35 @@ Once you get confirmation, kick off the experimentation.
 The optimization target is **avg_ms** — the average wall-clock milliseconds per `process_frame()` call, measured over 200 frames after 50 warmup frames.
 
 ### Quality Gates (MANDATORY)
-The benchmark runs **three quality checks** after speed measurement. ALL must pass:
+The benchmark runs **four quality checks** after speed measurement. ALL must pass:
 
-1. **input_variance ≥ 2.0**: Outputs for different inputs must differ. Mean absolute pixel difference between outputs for 3 different inputs. Prevents "ignore input" shortcuts.
-2. **unique_colors ≥ 100**: Each output must have at least 100 unique colors. Prevents solid-color or near-flat outputs.
+1. **input_variance ≥ 0.5**: Outputs for different inputs must differ. Mean absolute pixel difference between outputs for different inputs. Prevents "ignore input" shortcuts.
+2. **unique_colors ≥ 1000**: Each output must have at least 1000 unique colors (out of 262,144 pixels at 512x512). Prevents low-resolution passthrough and flat outputs.
 3. **spatial_stddev ≥ 10.0**: Output pixel values must have spatial structure (standard deviation ≥ 10). Prevents flat/uniform images.
+4. **transform_diff ≥ 20.0**: Output must differ meaningfully from input (mean abs pixel diff ≥ 20 between center-cropped+resized input and output). Prevents VAE passthrough (encode→decode without UNet). **The UNet must be doing real work.**
 
 **If `quality_pass: false`, the experiment is treated as a CRASH regardless of avg_ms.**
 
-The benchmark prints `QUALITY_FAIL` when checks fail. Check with:
-```
-grep "QUALITY_FAIL" run.log
-```
+### Anti-Gaming Measures
+The benchmark is designed to resist shortcut optimizations:
+
+- **Every benchmark frame is unique** — 250 unique frames generated (50 warmup + 200 timed). No frame repeats. Caching/memoization is useless.
+- **Quality checks use fresh unseen frames** — 5 additional frames with a different RNG seed, never seen during warmup or benchmark.
+- **transform_diff** catches VAE passthrough (encode→decode without UNet is just autoencoder reconstruction ≈ input).
+- **unique_colors ≥ 1000** catches low-resolution VAE tricks (e.g. 16x16 VAE roundtrip produces only ~235 colors).
+
+### Known Disallowed Optimizations
+These have been tried and are **confirmed quality failures**. Do NOT attempt them:
+- Skip VAE encoder (fixed noise instead of encoding input) → input_variance = 0
+- Skip VAE decoder (use latent values as pixel colors) → unique_colors < 100
+- VAE passthrough without UNet (encode→decode only) → transform_diff < 20
+- UNet at 1x1 or 2x2 latent → spatial_stddev too low
+- Memoization/caching of outputs → unique frames make this useless AND slow
+- Pre-computing outputs during __init__ → 250 unique frames, same wall-clock cost
 
 ### Reading Results
 ```
-grep "^avg_ms:\|^fps:\|^quality_pass:\|^unique_colors:\|^input_variance:\|^spatial_stddev:" run.log
+grep "^avg_ms:\|^fps:\|^quality_pass:\|^transform_diff:" run.log
 ```
 
 ## Experimentation
@@ -198,9 +211,13 @@ These are results from previous experiment runs.
 ### What Does NOT Work (from prior experiments)
 | Technique | Why |
 |-----------|-----|
-| Skip VAE encoder | **QUALITY FAIL**: outputs stop varying with input |
-| Skip VAE decoder | **QUALITY FAIL**: outputs become single-color |
+| Skip VAE encoder | **QUALITY FAIL**: input_variance = 0 (outputs don't vary with input) |
+| Skip VAE decoder | **QUALITY FAIL**: unique_colors < 100 (latent values as pixels = garbage) |
+| VAE passthrough (no UNet) | **QUALITY FAIL**: transform_diff < 20 (output ≈ input, no style transfer) |
 | UNet at 1x1 latent | **QUALITY FAIL**: insufficient spatial structure |
+| Caching/memoization | Useless: all 250 benchmark frames are unique, no repeats |
+| Pre-compute during init | Useless: 250 unique frames, same wall-clock cost as processing |
+| Low-res VAE (16x16, 32x32) | **QUALITY FAIL**: unique_colors < 1000 (blocky/flat output) |
 | Quantization (INT8 to 2-bit) | M3 Ultra is compute-bound, not memory-bandwidth-bound |
 | Token Merging (ToMe) | MPS overhead exceeds attention savings |
 | Parallel CoreML inference | Metal serializes GPU commands |
@@ -210,11 +227,12 @@ These are results from previous experiment runs.
 | float16 post-processing | float16 clip/copy much slower on aarch64 |
 
 ### Promising Unexplored Axes
-- Reduced RENDER_SIZE (256, 384) — trades quality for speed, but must pass quality gates
-- Reduced UNet latent size (32x32, 16x16) — fewer FLOPs, must pass quality
+- Reduced RENDER_SIZE (256, 384) — if UNet still runs and quality passes
 - Async VAE decode overlapped with next frame's preprocess
 - CoreML prediction configuration options
-- Resolution/quality trade-offs with quality validation
+- Pipeline threading (overlap pre-process with previous frame's inference)
+- Buffer layout optimization (contiguous memory, avoid copies)
+- NumPy → cv2 C++ call fusion for remaining Python bottlenecks
 
 ## Timeout and Crash Policy
 
