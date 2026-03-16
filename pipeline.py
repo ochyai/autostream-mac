@@ -212,10 +212,9 @@ class InferencePipeline:
         """
         # UNet inference at 64x64 (encoder+decoder skipped)
         u = self.unet.predict(self._unet_input)
-        npred = np.asarray(u["noise_pred"])  # (1, 4, 64, 64) float32
 
-        # Postprocess: use npred directly (skip denoise, use first 3 channels as colors)
-        cv2.convertScaleAbs(npred[0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
+        # Postprocess: CoreML already returns numpy array, skip np.asarray wrapper
+        cv2.convertScaleAbs(u["noise_pred"][0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
         np.copyto(self._bgr_64, self._uint8_64[::-1].transpose(1, 2, 0))
         cv2.resize(self._bgr_64, (OUTPUT_SIZE, OUTPUT_SIZE), dst=self._output_buf)
         return self._output_buf
