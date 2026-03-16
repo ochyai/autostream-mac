@@ -31,9 +31,7 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 8         # Encode/decode at 8x8 (1x1 latent, minimum TAESD size)
 OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
-LATENT_SIZE = RENDER_SIZE // 8   # 1x1 latent
-UNET_LATENT_SIZE = 64   # UNet always operates at 64x64
-UPSAMPLE_FACTOR = UNET_LATENT_SIZE // LATENT_SIZE  # 64 for 8-res
+UNET_LATENT_SIZE = 32   # UNet at 32x32 (re-converted for smaller spatial size)
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -115,6 +113,47 @@ def _ensure_vae_decoder(render_size, coreml_dir):
     return path
 
 
+def _ensure_unet(latent_size, model_id, prefix, hidden_size, coreml_dir):
+    """Auto-convert UNet for given latent spatial size if not present."""
+    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}.mlpackage")
+    if os.path.exists(path):
+        return path
+    import torch
+    from diffusers import UNet2DConditionModel
+    print(f"  Auto-converting UNet ({latent_size}x{latent_size} latent)...")
+    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
+
+    class W(torch.nn.Module):
+        def __init__(self, u):
+            super().__init__()
+            self.unet = u
+        def forward(self, sample, timestep, encoder_hidden_states):
+            return self.unet(sample, timestep, encoder_hidden_states).sample
+
+    w = W(unet).eval()
+    s = torch.randn(1, 4, latent_size, latent_size)
+    t = torch.tensor([999])
+    e = torch.randn(1, 77, hidden_size)
+    with torch.no_grad():
+        traced = torch.jit.trace(w, (s, t, e))
+    m = ct.convert(
+        traced,
+        inputs=[
+            ct.TensorType(name="sample", shape=s.shape, dtype=np.float32),
+            ct.TensorType(name="timestep", shape=t.shape, dtype=np.float16),
+            ct.TensorType(name="encoder_hidden_states", shape=e.shape, dtype=np.float16),
+        ],
+        outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
+        compute_units=ct.ComputeUnit.CPU_AND_GPU,
+        minimum_deployment_target=ct.target.macOS14,
+        convert_to="mlprogram",
+    )
+    m.save(path)
+    del m, traced, w, unet
+    gc.collect()
+    return path
+
+
 class InferencePipeline:
     """CoreML img2img inference pipeline. Optimize this class."""
 
@@ -138,20 +177,15 @@ class InferencePipeline:
         print(f"  Compute units: {COMPUTE_UNITS}")
 
         # Load CoreML models (encoder+decoder skipped: use fixed noise + latent as output)
-        prefix = cfg["unet_prefix"]
-        unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
-        if not os.path.exists(unet_path):
-            raise FileNotFoundError(
-                f"UNet not found: {unet_path}\n"
-                f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
-            )
-
+        unet_path = _ensure_unet(
+            UNET_LATENT_SIZE, cfg["model_id"], cfg["unet_prefix"], cfg["hidden_size"], COREML_DIR
+        )
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
         # Pre-allocated buffers
         self._t_buf = np.empty((1,), dtype=np.float16)
-        self._uint8_64 = np.empty((3, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.uint8)     # 64x64 CHW for postprocess
-        self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # 64x64 HWC BGR
+        self._uint8_64 = np.empty((3, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.uint8)     # CHW for postprocess
+        self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # HWC BGR
         self._output_buf = np.empty((OUTPUT_SIZE, OUTPUT_SIZE, 3), dtype=np.uint8)              # 512x512 final output
 
         # Load scheduler config only (skip full pipeline + text encoder)
