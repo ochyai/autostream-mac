@@ -224,17 +224,10 @@ class InferencePipeline:
         self._warmup()
 
     def _warmup(self, n=25):
-        dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
-        np.copyto(self._img_buf, dummy)
+        # Use exact same ops as process_frame to compile the correct GPU codepath
+        dummy = np.random.randn(RENDER_SIZE, RENDER_SIZE, 3).astype(np.uint8)
         for _ in range(n):
-            e = self.vae_encoder.predict({"image": self._img_buf})
-            np.copyto(self._lat_buf, np.array(e["latent"]).astype(np.float16))
-            u = self.unet.predict({
-                "sample": self._lat_buf, "timestep": self._t_buf,
-                "encoder_hidden_states": self._prompt_embeds,
-            })
-            np.copyto(self._out_buf, np.array(u["noise_pred"]).astype(np.float16))
-            self.vae_decoder.predict({"latent": self._out_buf})
+            self.process_frame(dummy)
 
     def process_frame(self, frame_bgr):
         """Full pipeline: preprocess -> VAE enc -> UNet -> VAE dec -> postprocess.
