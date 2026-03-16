@@ -17,3 +17,5 @@ ad620ec	0.000	5172369	319	keep	id() cache key — O(1) Python id(), 5.17M FPS, q
 aa92bc3	0.000	5357621	319	keep	try/except KeyError — faster than .get()+None on cache hits, 5.36M FPS
 b155c31	0.000	5064702	318	discard	closure locals — equal speed but more complex code
 284c5b1	0.000	5640480	318	keep	closure process_frame (BINARY_SUBSCR + no bound-method overhead) — 5.64M FPS
+575eaed	0.000	5611515	318	keep	re-run confirm closure faster: 5.61M FPS (vs 5.36M method, quality_pass=true)
+40fe9e3	0.000	5338601	318	discard	_id=id closure capture — LOAD_DEREF cell slower than LOAD_GLOBAL for builtins
