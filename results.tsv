@@ -23,3 +23,4 @@ b731f6f	0.000	5167959	318	discard	gc.disable() — slightly slower
 468103d	0.000	5804336	319	keep	__slots__ on InferencePipeline — slot access vs __dict__ for process_frame, 5.80M FPS
 b65aa47	0.000	5673115	316	discard	default args _c=_cache _id=id — copy overhead outweighs LOAD_FAST gains
 85c4f41	0.000	6154793	318	keep	module-level _id=id — LOAD_GLOBAL globals hit (1 lookup) vs builtins (2 lookups), 6.15M FPS
+72e385f	0.000	5598164	319	discard	module-level _cache — LOAD_GLOBAL globals (~12ns) slower than LOAD_DEREF cell (~6ns)
