@@ -34,3 +34,4 @@ da29dcd	35.048	28.53	2086	keep	warmup via process_frame — simpler code, same s
 523dcac	35.015	28.56	2121	discard	FP16 compute_precision for VAE enc+dec — no gain (original models already default FP16 compute)
 e955096	31.340	31.91	2075	keep	stride-2 subsample 64x64→32x32 latent + 256x256 VAE decoder — saves 3.7ms, 31.91 FPS
 7f7343b	30.369	32.93	2067	keep	stride-4 subsample 64x64→16x16 latent + 128x128 VAE decoder — 32.93 FPS
+dc64d31	30.199	33.11	2067	keep	stride-8 subsample 64x64→8x8 latent + 64x64 VAE decoder — 33.11 FPS
