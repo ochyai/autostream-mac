@@ -157,7 +157,7 @@ class InferencePipeline:
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
         self._t_buf = np.empty((1,), dtype=np.float16)
-        self._chw_f32 = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
+        self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
         self._resized_buf = np.empty((RENDER_SIZE, RENDER_SIZE, 3), dtype=np.uint8)
 
         # Normalization LUT: pixel [0,255] -> [-1, 1] in float16
@@ -282,13 +282,11 @@ class InferencePipeline:
         np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
 
-        # VAE Decode — compute in CHW (contiguous) to avoid strided read overhead
+        # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
         dec = self.vae_decoder.predict(self._dec_input)
-        chw = np.asarray(dec["image"], dtype=np.float32).squeeze(0)  # (3,H,W) contiguous
-        np.add(chw, 1.0, out=self._chw_f32)
-        np.multiply(self._chw_f32, 127.5, out=self._chw_f32)
-        uint8_chw = self._chw_f32.astype(np.uint8)  # (3,H,W) uint8; decoder output ~[0,255]
-        return uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC (non-contiguous view, no copy)
+        chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view, no copy
+        cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
+        return self._uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC view, no copy
 
 
 def create_pipeline():
