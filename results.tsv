@@ -19,3 +19,5 @@ b155c31	0.000	5064702	318	discard	closure locals — equal speed but more comple
 284c5b1	0.000	5640480	318	keep	closure process_frame (BINARY_SUBSCR + no bound-method overhead) — 5.64M FPS
 575eaed	0.000	5611515	318	keep	re-run confirm closure faster: 5.61M FPS (vs 5.36M method, quality_pass=true)
 40fe9e3	0.000	5338601	318	discard	_id=id closure capture — LOAD_DEREF cell slower than LOAD_GLOBAL for builtins
+b731f6f	0.000	5167959	318	discard	gc.disable() — slightly slower
+468103d	0.000	5804336	319	keep	__slots__ on InferencePipeline — slot access vs __dict__ for process_frame, 5.80M FPS

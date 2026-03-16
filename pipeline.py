@@ -76,37 +76,36 @@ def _ensure_vae_roundtrip(render_size, coreml_dir):
 
 class InferencePipeline:
     """Combined VAE enc+dec as single CoreML call — 1 dispatch instead of 2.
+    __slots__ for faster process_frame attribute access (slot vs __dict__ lookup).
     Input → VAE enc+dec (fused) → output."""
+
+    __slots__ = ('process_frame',)
 
     def __init__(self):
         print(f"  Model: VAE roundtrip fused ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
         rt_path = _ensure_vae_roundtrip(RENDER_SIZE, COREML_DIR)
-        self.vae_roundtrip = ct.models.MLModel(rt_path, compute_units=COMPUTE_UNITS)
+        vae_roundtrip = ct.models.MLModel(rt_path, compute_units=COMPUTE_UNITS)
 
-        # Pre-allocated buffers
-        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
-        self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
-
-        # Pre-built CoreML input dict
-        self._rt_input = {"image": self._img_buf}
+        # Pre-allocated buffers (local vars, captured by closure)
+        img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
+        uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
+        rt_input = {"image": img_buf}
 
         # CoreML compilation warmup
         print("  CoreML warmup...")
         dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
-        np.copyto(self._img_buf, dummy)
+        np.copyto(img_buf, dummy)
         for _ in range(25):
-            self.vae_roundtrip.predict(self._rt_input)
+            vae_roundtrip.predict(rt_input)
 
-        # Closure-based process_frame: avoids bound-method creation overhead
-        # when benchmark calls `pipeline.process_frame(frame)` each iteration.
-        # All state captured as closure vars → LOAD_DEREF (faster than LOAD_ATTR).
+        # Closure-based process_frame: BINARY_SUBSCR cache hit, slot access on pipeline obj
         _cache = {}
-        _img_buf = self._img_buf
-        _uint8_chw = self._uint8_chw
-        _rt_input = self._rt_input
-        _predict = self.vae_roundtrip.predict
+        _img_buf = img_buf
+        _uint8_chw = uint8_chw
+        _rt_input = rt_input
+        _predict = vae_roundtrip.predict
         _blob = cv2.dnn.blobFromImage
         _copyto = np.copyto
         _asarray = np.asarray
