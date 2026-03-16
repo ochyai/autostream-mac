@@ -194,6 +194,7 @@ class InferencePipeline:
         self._sqrt_a = np.float32(np.sqrt(ap))
         self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
         self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
+        self._neg_K = np.float32(-float(self._inv_sqrt_a) * float(self._sqrt_1ma))
 
         # Encode prompt
         with torch.no_grad():
@@ -268,10 +269,10 @@ class InferencePipeline:
         u = self.unet.predict(self._unet_input)
         npred = np.asarray(u["noise_pred"])  # (1, 4, 64, 64) float32
 
-        # Denoise at 64x64
-        np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
-        np.subtract(self._unet_sample, self._out_buf, out=self._out_buf)
-        np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
+        # Denoise at 64x64: inv_sqrt_a * unet_sample + (-K) * npred in one C call
+        cv2.addWeighted(self._unet_sample.reshape(4, 64, 64), float(self._inv_sqrt_a),
+                        npred.reshape(4, 64, 64), float(self._neg_K), 0.0,
+                        dst=self._out_buf.reshape(4, 64, 64))
 
         # Downsample 64x64 → LATENT_SIZE for small decoder (stride nearest neighbor)
         np.copyto(self._dec_in_buf, self._out_buf[:, :, ::UPSAMPLE_FACTOR, ::UPSAMPLE_FACTOR])

@@ -54,3 +54,4 @@ a5b5428	24.961	40.07	1902	keep	32-res VAE enc/dec with 16x latent upsample (avg 
 43ee8a0	24.212	41.31	1881	discard	broadcast_to + fused multiply instead of repeat+repeat+copyto (non-contiguous strides slower)
 56feb11	24.112	41.47	1884	discard	INTER_NEAREST for 8->512 output resize (avg 2 runs, 0.013ms noise)
 ede7c95	24.088	41.52	1884	keep	broadcast add fuses upsample+noise: scale clean into (L,L) buf, add to (64,64) noise (avg 2 runs, simpler + 0.011ms)
+dedc435	23.896	41.85	1881	keep	cv2.addWeighted for denoise: fuse 3 numpy ops into 1 C call (avg 2 runs, 0.192ms faster)
