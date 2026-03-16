@@ -216,6 +216,15 @@ class InferencePipeline:
         self._fb = np.float16(LATENT_FEEDBACK)
         self._fb_inv = np.float16(1.0 - LATENT_FEEDBACK)
 
+        # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
+        self._enc_input = {"image": self._img_buf}
+        self._unet_input = {
+            "sample": self._lat_buf,
+            "timestep": self._t_buf,
+            "encoder_hidden_states": self._prompt_embeds,
+        }
+        self._dec_input = {"latent": self._out_buf}
+
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
         self._warmup()
@@ -259,7 +268,7 @@ class InferencePipeline:
         np.copyto(self._img_buf, self._norm_lut[rgb].transpose(2, 0, 1)[np.newaxis])
 
         # VAE Encode
-        enc = self.vae_encoder.predict({"image": self._img_buf})
+        enc = self.vae_encoder.predict(self._enc_input)
         clean = np.asarray(enc["latent"], dtype=np.float16)
 
         # Latent feedback from previous frame
@@ -271,10 +280,7 @@ class InferencePipeline:
         np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
 
         # UNet inference
-        u = self.unet.predict({
-            "sample": self._lat_buf, "timestep": self._t_buf,
-            "encoder_hidden_states": self._prompt_embeds,
-        })
+        u = self.unet.predict(self._unet_input)
         npred = np.asarray(u["noise_pred"], dtype=np.float16)
 
         # Compute denoised directly into _out_buf (no temp allocations)
@@ -285,7 +291,7 @@ class InferencePipeline:
         self._has_prev = True
 
         # VAE Decode
-        dec = self.vae_decoder.predict({"latent": self._out_buf})
+        dec = self.vae_decoder.predict(self._dec_input)
         r = np.asarray(dec["image"], dtype=np.float32).squeeze(0).transpose(1, 2, 0)
         r = ((r + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 

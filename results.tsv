@@ -5,3 +5,6 @@ baseline	39.230	25.49	1891	keep	baseline (SDXS-512 CoreML CPU_AND_GPU on M3 Ultr
 8ec930d	39.057	25.61	1887	keep	eliminate latent arithmetic allocations using out= buffers and pre-computed constants
 74c3730	49.429	20.23	1890	discard	float16 post-processing with pre-allocated buffers (float16 clip/copy much slower on aarch64)
 fc32cee	38.988	25.65	1887	keep	use INTER_NEAREST for resize (faster for diffusion model input)
+f93488f	39.334	25.42	1887	discard	cv2.dnn.blobFromImage preprocessing (INTER_LINEAR + float32->float16 copy overhead)
+19bf8d3	38.986	25.65	1886	discard	in-place feedback blend into _lat_buf (5 numpy calls outweigh 3 alloc savings)
+42a58f5	37.560	26.62	1885	keep	pre-build CoreML input dicts in init (avoid per-frame dict alloc + coremltools overhead)
