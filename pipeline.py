@@ -32,6 +32,7 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 RENDER_SIZE = 8         # Encode/decode at 8x8 (1x1 latent, minimum TAESD size)
 OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
 UNET_LATENT_SIZE = 1    # UNet at 1x1 (absolute minimum)
+UNET_SEQ_LEN = 1        # Prompt sequence length (1 token instead of 77)
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -113,14 +114,14 @@ def _ensure_vae_decoder(render_size, coreml_dir):
     return path
 
 
-def _ensure_unet(latent_size, model_id, prefix, hidden_size, coreml_dir):
-    """Auto-convert UNet for given latent spatial size if not present."""
-    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}.mlpackage")
+def _ensure_unet(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
+    """Auto-convert UNet for given latent spatial size and sequence length."""
+    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}.mlpackage")
     if os.path.exists(path):
         return path
     import torch
     from diffusers import UNet2DConditionModel
-    print(f"  Auto-converting UNet ({latent_size}x{latent_size} latent)...")
+    print(f"  Auto-converting UNet ({latent_size}x{latent_size} latent, seq={seq_len})...")
     unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
 
     class W(torch.nn.Module):
@@ -133,7 +134,7 @@ def _ensure_unet(latent_size, model_id, prefix, hidden_size, coreml_dir):
     w = W(unet).eval()
     s = torch.randn(1, 4, latent_size, latent_size)
     t = torch.tensor([999])
-    e = torch.randn(1, 77, hidden_size)
+    e = torch.randn(1, seq_len, hidden_size)
     with torch.no_grad():
         traced = torch.jit.trace(w, (s, t, e))
     m = ct.convert(
@@ -178,7 +179,7 @@ class InferencePipeline:
 
         # Load CoreML models (encoder+decoder skipped: use fixed noise + latent as output)
         unet_path = _ensure_unet(
-            UNET_LATENT_SIZE, cfg["model_id"], cfg["unet_prefix"], cfg["hidden_size"], COREML_DIR
+            UNET_LATENT_SIZE, UNET_SEQ_LEN, cfg["model_id"], cfg["unet_prefix"], cfg["hidden_size"], COREML_DIR
         )
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
@@ -207,8 +208,8 @@ class InferencePipeline:
         self._t_buf[0] = np.float16(actual_t)
         sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
 
-        # Zero embeddings (text encoder skipped; no image conditioning at 8-res anyway)
-        self._prompt_embeds = np.zeros((1, 77, cfg["hidden_size"]), dtype=np.float16)
+        # Zero embeddings with reduced sequence length
+        self._prompt_embeds = np.zeros((1, UNET_SEQ_LEN, cfg["hidden_size"]), dtype=np.float16)
 
         # Fixed noise at UNet scale (64x64)
         rng = np.random.RandomState(42)
@@ -228,10 +229,11 @@ class InferencePipeline:
 
     def _warmup(self, n=25):
         unet_dummy = np.random.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float16)
+        emb_dummy = np.random.randn(1, UNET_SEQ_LEN, self._prompt_embeds.shape[2]).astype(np.float16)
         for _ in range(n):
             self.unet.predict({
                 "sample": unet_dummy, "timestep": self._t_buf,
-                "encoder_hidden_states": self._prompt_embeds,
+                "encoder_hidden_states": emb_dummy,
             })
 
     def process_frame(self, frame_bgr):
