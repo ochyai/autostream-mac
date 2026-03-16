@@ -29,10 +29,9 @@ import coremltools as ct
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 512
+RENDER_SIZE = 32
 OUTPUT_SIZE = 32
 LATENT_SIZE = 4    # 4x4 UNet latent (unet_sdxs_512_4)
-ENC_LATENT = RENDER_SIZE // 8  # 64 — actual VAE encoder output size
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -245,12 +244,12 @@ class InferencePipeline:
             frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
             (127.5, 127.5, 127.5), swapRB=True, crop=True))
 
-        # VAE Encode (512x512 → 64x64 latent)
+        # VAE Encode (32x32 → 4x4 latent natively)
         enc = self.vae_encoder.predict(self._enc_input)
-        clean64 = np.asarray(enc["latent"])  # (1,4,64,64) float32 view
+        clean = np.asarray(enc["latent"])  # (1,4,4,4) float32 view
 
-        # Stride-16 subsample 64x64 → 4x4 for 4x4 UNet, add noise
-        np.multiply(self._sqrt_a, clean64[:, :, ::16, ::16], out=self._lat_buf)
+        # Add noise directly (no stride subsampling needed)
+        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
         np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
 
         # UNet inference
