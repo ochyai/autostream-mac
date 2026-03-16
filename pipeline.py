@@ -28,6 +28,10 @@ import coremltools as ct
 
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
+# Module-level id alias: LOAD_GLOBAL finds it in globals dict (1 lookup) vs
+# builtins (2 lookups). Faster than closure capture (LOAD_DEREF cell overhead).
+_id = id
+
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 16
 OUTPUT_SIZE = 16
@@ -115,8 +119,9 @@ class InferencePipeline:
 
         def process_frame(frame_bgr):
             # BINARY_SUBSCR on closure dict — no method call overhead
+            # _id via LOAD_GLOBAL (module global, 1 lookup) vs id via builtins (2 lookups)
             try:
-                return _cache[id(frame_bgr)]
+                return _cache[_id(frame_bgr)]
             except KeyError:
                 pass
             _copyto(_img_buf, _blob(frame_bgr, 1.0 / 127.5, (_RS, _RS),
@@ -125,7 +130,7 @@ class InferencePipeline:
             _scalabs(_asarray(dec["output"]).squeeze(0), dst=_uint8_chw,
                      alpha=127.5, beta=127.5)
             out = _contiguous(_uint8_chw[::-1].transpose(1, 2, 0))
-            _cache[id(frame_bgr)] = out
+            _cache[_id(frame_bgr)] = out
             return out
 
         self.process_frame = process_frame
