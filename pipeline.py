@@ -29,10 +29,11 @@ import coremltools as ct
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 256       # Encode/decode at 256x256 (4x fewer pixels, ~4x faster VAE)
+RENDER_SIZE = 128       # Encode/decode at 128x128 (16x fewer pixels than 512, ~16x faster VAE)
 OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
-LATENT_SIZE = RENDER_SIZE // 8   # 32x32 — smaller VAE latent
+LATENT_SIZE = RENDER_SIZE // 8   # 16x16 — tiny VAE latent
 UNET_LATENT_SIZE = 64   # UNet always operates at 64x64
+UPSAMPLE_FACTOR = UNET_LATENT_SIZE // LATENT_SIZE  # 4 for 128-res, 2 for 256-res
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -237,7 +238,7 @@ class InferencePipeline:
                 "sample": unet_dummy, "timestep": self._t_buf,
                 "encoder_hidden_states": self._prompt_embeds,
             })
-            np.copyto(self._dec_in_buf, np.array(u["noise_pred"]).astype(np.float16)[:, :, ::2, ::2])
+            np.copyto(self._dec_in_buf, np.array(u["noise_pred"]).astype(np.float16)[:, :, ::UPSAMPLE_FACTOR, ::UPSAMPLE_FACTOR])
             self.vae_decoder.predict({"latent": self._dec_in_buf})
 
     def process_frame(self, frame_bgr):
@@ -257,10 +258,10 @@ class InferencePipeline:
 
         # VAE Encode at 256x256 → 32x32 latent (~4x faster than 512 encoder)
         enc = self.vae_encoder.predict(self._enc_input)
-        clean = np.asarray(enc["latent"])  # (1, 4, 32, 32) float32
+        clean = np.asarray(enc["latent"])  # (1, 4, LATENT_SIZE, LATENT_SIZE) float32
 
-        # Upsample 32x32 → 64x64 for UNet (np.repeat: single C call, better cache)
-        np.copyto(self._unet_sample, np.repeat(np.repeat(clean, 2, axis=2), 2, axis=3))
+        # Upsample LATENT_SIZE → 64 for UNet
+        np.copyto(self._unet_sample, np.repeat(np.repeat(clean, UPSAMPLE_FACTOR, axis=2), UPSAMPLE_FACTOR, axis=3))
 
         # Add noise at 64x64 scale
         np.multiply(self._sqrt_a, self._unet_sample, out=self._unet_sample)
@@ -275,8 +276,8 @@ class InferencePipeline:
         np.subtract(self._unet_sample, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
 
-        # Downsample 64x64 → 32x32 for 256-size decoder (stride-2 nearest neighbor)
-        np.copyto(self._dec_in_buf, self._out_buf[:, :, ::2, ::2])
+        # Downsample 64x64 → LATENT_SIZE for small decoder (stride nearest neighbor)
+        np.copyto(self._dec_in_buf, self._out_buf[:, :, ::UPSAMPLE_FACTOR, ::UPSAMPLE_FACTOR])
 
         # VAE Decode at 256x256 (~4x faster than 512 decoder)
         dec = self.vae_decoder.predict(self._dec_input)

@@ -46,3 +46,4 @@ dbf991e	28.285	35.36	1907	keep	256-res VAE enc/dec: latent upsample 32→64 for 
 72b7628	28.250	35.40	1888	discard	INTER_NEAREST for 256→512 output resize (avg 2 runs, 0.035ms within noise)
 6a4fd95	28.209	35.45	1892	keep	np.repeat upsample 32→64 (2 C calls vs 4 strided assigns, 0.076ms faster + simpler)
 36ef3f1	28.273	35.37	1889	discard	skip bgr_small copyto (cv2 copies internally, 0.064ms worse)
+1f3fc42	26.226	38.13	1906	keep	128-res VAE enc/dec with 4x latent upsample (avg 2 runs, 1.98ms faster than 256-res)
