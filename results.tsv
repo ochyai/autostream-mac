@@ -65,3 +65,4 @@ abe300c	23.671	42.25	1029	keep	skip np.asarray on UNet output: access dict inlin
 ec1c50c	12.309	81.25	1184	keep	UNet at 32x32 latent: auto-converted via _ensure_unet (avg 2 runs, 11.362ms faster = 48% speedup)
 e12bd02	10.530	94.97	1135	keep	UNet at 16x16 latent (avg 2 runs, 1.779ms faster)
 b002599	9.173	109.02	1135	keep	UNet at 8x8 latent (avg 2 runs, 1.357ms faster)
+280a415	8.234	121.46	1136	keep	UNet at 4x4 latent (avg 2 runs, 0.939ms faster)
