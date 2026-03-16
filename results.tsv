@@ -63,3 +63,4 @@ dedc435	23.896	41.85	1881	keep	cv2.addWeighted for denoise: fuse 3 numpy ops int
 a6317e4	23.686	42.22	1029	keep	skip text encoder: zero embeddings + scheduler-only load (avg 2 runs, 0.024ms within noise; -845MB memory, -5s load)
 abe300c	23.671	42.25	1029	keep	skip np.asarray on UNet output: access dict inline (avg 2 runs, 0.015ms + simpler)
 ec1c50c	12.309	81.25	1184	keep	UNet at 32x32 latent: auto-converted via _ensure_unet (avg 2 runs, 11.362ms faster = 48% speedup)
+e12bd02	10.530	94.97	1135	keep	UNet at 16x16 latent (avg 2 runs, 1.779ms faster)
