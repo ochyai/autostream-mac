@@ -287,8 +287,7 @@ class InferencePipeline:
         chw = np.asarray(dec["image"], dtype=np.float32).squeeze(0)  # (3,H,W) contiguous
         np.add(chw, 1.0, out=self._chw_f32)
         np.multiply(self._chw_f32, 127.5, out=self._chw_f32)
-        np.clip(self._chw_f32, 0.0, 255.0, out=self._chw_f32)
-        uint8_chw = self._chw_f32.astype(np.uint8)  # (3,H,W) uint8
+        uint8_chw = self._chw_f32.astype(np.uint8)  # (3,H,W) uint8; decoder output ~[0,255]
         return uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC (non-contiguous view, no copy)
 
 

@@ -16,3 +16,4 @@ aef18c3	37.476	26.68	1890	discard	np.take per channel into CHW (3 calls overhead
 071b527	37.291	26.91	1890	keep	LATENT_FEEDBACK=0, remove all feedback code (simpler pipeline, 11 fewer lines)
 ba17589	46.617	21.45	1886	discard	ComputeUnit.ALL for VAE enc/dec (ANE overhead makes small models slower)
 29c47b4	37.170	26.89	1891	keep	pre-alloc resize buffer, cv2.resize dst= (avoid 786KB uint8 alloc per frame)
+d0874fb	36.568	27.34	1891	keep	skip np.clip in post-processing (0.6ms saved, one full 3MB pass eliminated)
