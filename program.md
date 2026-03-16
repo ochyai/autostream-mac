@@ -7,10 +7,14 @@ Adapted from [Karpathy's autoresearch](https://github.com/karpathy/autoresearch)
 
 ## Overview
 
-The goal is simple: **minimize avg_ms** (average milliseconds per inference frame).
-Lower avg_ms = higher FPS = faster real-time diffusion.
+The goal is simple: **minimize avg_ms** (average milliseconds per inference frame)
+**while maintaining output quality** (the pipeline must produce real images from input).
 
-The current baseline pipeline runs CoreML-accelerated SDXS-512 img2img at ~22 FPS
+Lower avg_ms = higher FPS = faster real-time diffusion.
+But FPS without quality is meaningless — a pipeline that ignores input or outputs
+solid colors is a broken pipeline, no matter how fast.
+
+The current baseline pipeline runs CoreML-accelerated SDXS-512 img2img at ~28 FPS
 on M3 Ultra (512GB). Everything in the inference pipeline is fair game for optimization.
 
 ## Setup
@@ -31,11 +35,29 @@ To set up a new experiment run, work with the user to:
 
 Once you get confirmation, kick off the experimentation.
 
-## The Metric
+## The Metrics
 
-The single optimization target is **avg_ms** — the average wall-clock milliseconds per `process_frame()` call, measured over 200 frames after 50 warmup frames.
+### Primary Metric: avg_ms (speed)
+The optimization target is **avg_ms** — the average wall-clock milliseconds per `process_frame()` call, measured over 200 frames after 50 warmup frames.
 
-The benchmark also reports supporting metrics (p50, p99, memory) but avg_ms is what determines keep/discard.
+### Quality Gates (MANDATORY)
+The benchmark runs **three quality checks** after speed measurement. ALL must pass:
+
+1. **input_variance ≥ 2.0**: Outputs for different inputs must differ. Mean absolute pixel difference between outputs for 3 different inputs. Prevents "ignore input" shortcuts.
+2. **unique_colors ≥ 100**: Each output must have at least 100 unique colors. Prevents solid-color or near-flat outputs.
+3. **spatial_stddev ≥ 10.0**: Output pixel values must have spatial structure (standard deviation ≥ 10). Prevents flat/uniform images.
+
+**If `quality_pass: false`, the experiment is treated as a CRASH regardless of avg_ms.**
+
+The benchmark prints `QUALITY_FAIL` when checks fail. Check with:
+```
+grep "QUALITY_FAIL" run.log
+```
+
+### Reading Results
+```
+grep "^avg_ms:\|^fps:\|^quality_pass:\|^unique_colors:\|^input_variance:\|^spatial_stddev:" run.log
+```
 
 ## Experimentation
 
@@ -50,6 +72,8 @@ The benchmark also reports supporting metrics (p50, p99, memory) but avg_ms is w
   - Latent space operations (noise, feedback)
   - Pipeline structure and data flow
   - Async/threaded sub-operations within the pipeline
+  - VAE resolution trade-offs (lower RENDER_SIZE if quality still passes)
+  - UNet latent size trade-offs (if quality still passes)
 
 **What you CANNOT do:**
 - Modify `benchmark.py`. It is read-only. It provides the fixed evaluation.
@@ -57,6 +81,9 @@ The benchmark also reports supporting metrics (p50, p99, memory) but avg_ms is w
 - Modify `scripts/convert_models.py`.
 - Install new packages or add dependencies beyond what's in `requirements.txt`.
 - Change the interface contract: `create_pipeline()` must return an object with `.process_frame(frame_bgr)` that takes BGR uint8 (H,W,3) and returns BGR uint8 (output_size, output_size, 3).
+- **Skip VAE encoder entirely** — the pipeline MUST encode the input frame.
+- **Skip VAE decoder entirely** — the pipeline MUST decode latents back to pixel space.
+- **Ignore the input frame** — `frame_bgr` must actually influence the output.
 
 **Simplicity criterion**: All else being equal, simpler is better. A tiny improvement that adds ugly complexity is not worth it. Removing code and getting equal or better results is a win. An improvement of ~0 but much simpler code? Keep.
 
@@ -68,20 +95,19 @@ The benchmark prints a summary like this:
 
 ```
 ---
-avg_ms:     44.123
-fps:        22.66
-p50_ms:     43.890
-p99_ms:     48.234
-min_ms:     42.100
-max_ms:     51.300
+avg_ms:     34.951
+fps:        28.61
+p50_ms:     34.890
+p99_ms:     35.234
+min_ms:     34.100
+max_ms:     36.300
 memory_mb:  4200.0
 n_frames:   200
 load_secs:  25.3
-```
-
-Read the key metric with:
-```
-grep "^avg_ms:" run.log
+quality_pass: true
+unique_colors: 45230
+input_variance: 18.42
+spatial_stddev: 52.31
 ```
 
 ## Logging Results
@@ -95,24 +121,24 @@ commit	avg_ms	fps	memory_mb	status	description
 ```
 
 1. git commit hash (short, 7 chars)
-2. avg_ms achieved (e.g. 44.123) — use 0.000 for crashes
-3. fps (e.g. 22.66) — use 0.00 for crashes
-4. peak memory in MB, round to .0f — use 0 for crashes
-5. status: `keep`, `discard`, or `crash`
+2. avg_ms achieved (e.g. 34.951) — use 0.000 for crashes/quality fails
+3. fps (e.g. 28.61) — use 0.00 for crashes/quality fails
+4. peak memory in MB, round to .0f — use 0 for crashes/quality fails
+5. status: `keep`, `discard`, `crash`, or `qfail` (quality failure)
 6. short text description of what this experiment tried
 
 Example:
 
 ```
 commit	avg_ms	fps	memory_mb	status	description
-baseline	44.123	22.66	4200	keep	baseline (SDXS-512 CoreML CPU_AND_GPU)
-a1b2c3d	43.500	22.99	4200	keep	remove redundant astype in VAE decode
-e4f5g6h	45.200	22.12	4200	discard	use COMPUTE_UNIT.ALL (ANE slower)
+baseline	34.951	28.61	4200	keep	baseline (SDXS-512 full pipeline, quality-gated)
+a1b2c3d	34.500	28.99	4200	keep	remove redundant astype in VAE decode
+e4f5g6h	0.000	0.00	0	qfail	skip VAE encoder (quality: outputs don't vary with input)
 ```
 
 ## The Experiment Loop
 
-The experiment runs on a dedicated branch (e.g. `autostream/mar16`).
+The experiment runs on a dedicated branch (e.g. `autostream/mar17`).
 
 LOOP FOREVER:
 
@@ -124,24 +150,28 @@ LOOP FOREVER:
    - Can we change data layout?
    - Can we overlap independent operations?
    - Are there unnecessary computations?
+   - Can we reduce RENDER_SIZE while still passing quality checks?
 3. **Edit `pipeline.py`**: Make one focused change per experiment. Don't change too many things at once — you need to know what works.
 4. **Commit**: `git add pipeline.py && git commit -m "experiment: <description>"`
-5. **Run benchmark**: `python benchmark.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
-6. **Read results**: `grep "^avg_ms:\|^fps:\|^memory_mb:" run.log`
-7. **Handle crashes**: If grep is empty, run `tail -n 50 run.log` for the traceback. Fix if it's trivial (typo, import). If the idea is broken, log as crash and move on.
+5. **Run benchmark**: `.venv/bin/python benchmark.py > run.log 2>&1` (redirect everything — do NOT use tee or let output flood your context)
+6. **Read results**: `grep "^avg_ms:\|^fps:\|^memory_mb:\|^quality_pass:" run.log`
+7. **Handle crashes/quality failures**:
+   - If `quality_pass: false` or `QUALITY_FAIL` in output: this is a FAILED experiment. Log as `qfail`, revert, and move on. Do NOT keep quality-failing experiments.
+   - If grep is empty (crash): run `tail -n 50 run.log` for the traceback. Fix if trivial. Otherwise log as crash and move on.
 8. **Record results**: Append to results.tsv.
 9. **Keep or discard**:
-   - If avg_ms **decreased** (faster): `git add results.tsv && git commit --amend --no-edit` — this advances the branch.
-   - If avg_ms is **equal or worse**: record the discard commit hash, then `git reset --hard <previous kept commit>` to revert cleanly.
+   - If `quality_pass: true` AND avg_ms **decreased** (faster): `git add results.tsv && git commit --amend --no-edit` — this advances the branch.
+   - If avg_ms is **equal or worse** (or quality failed): record the commit hash, then `git reset --hard <previous kept commit>` to revert cleanly.
 10. **Repeat**: Go back to step 1.
 
 ## Decision Rules
 
 ### When to KEEP
-- avg_ms decreased by any measurable amount (>0.1ms)
-- avg_ms is equal but code is significantly simpler (fewer lines, clearer logic)
+- `quality_pass: true` AND avg_ms decreased by any measurable amount (>0.1ms)
+- `quality_pass: true` AND avg_ms is equal but code is significantly simpler
 
 ### When to DISCARD
+- `quality_pass: false` — ALWAYS discard, regardless of speed
 - avg_ms increased or stayed the same (with no simplification benefit)
 - Memory usage increased dramatically (>2x) with negligible speed gain
 
@@ -151,33 +181,40 @@ LOOP FOREVER:
 
 ## Known Results from Prior Work
 
-These are results from the original streamdiffusion-mac experiment report. They inform your search but **do not replace running your own experiments** — hardware and software versions differ.
+These are results from previous experiment runs.
 
 ### What Works on Apple Silicon
 | Technique | Effect | Notes |
 |-----------|--------|-------|
 | CoreML conversion | +64% | Only effective UNet acceleration method |
 | Distilled models (SDXS) | +118% | Best speed/quality trade-off |
+| cv2.dnn.blobFromImage | ~0.5ms | Fuses crop+resize+BGR2RGB+norm+NCHW in one C++ call |
+| cv2.LUT for normalization | ~0.6ms | 6x faster than numpy fancy-index |
+| cv2.convertScaleAbs | ~0.6ms | Fuses post-processing add+multiply+astype |
+| Pre-built CoreML input dicts | ~1.5ms | Avoid per-frame dict alloc |
+| float32 latent arithmetic | ~0.4ms | Skip f32↔f16 conversions |
+| INTER_NEAREST resize | ~0.05ms | Faster for diffusion input |
 
 ### What Does NOT Work (from prior experiments)
 | Technique | Why |
 |-----------|-----|
+| Skip VAE encoder | **QUALITY FAIL**: outputs stop varying with input |
+| Skip VAE decoder | **QUALITY FAIL**: outputs become single-color |
+| UNet at 1x1 latent | **QUALITY FAIL**: insufficient spatial structure |
 | Quantization (INT8 to 2-bit) | M3 Ultra is compute-bound, not memory-bandwidth-bound |
 | Token Merging (ToMe) | MPS overhead exceeds attention savings |
 | Parallel CoreML inference | Metal serializes GPU commands |
 | Neural Engine for UNet | ANE unsuitable for large models |
 | torch.compile | MPS backend not supported |
-| Attention Slicing | MPS memory management overhead |
+| ComputeUnit.ALL | ANE overhead for small models |
+| float16 post-processing | float16 clip/copy much slower on aarch64 |
 
-### Unexplored Optimization Axes
-These have NOT been systematically tested in the current pipeline code:
-- Pre/post processing optimization (NumPy → more efficient alternatives)
-- Buffer management (avoiding copies, pre-allocation patterns)
+### Promising Unexplored Axes
+- Reduced RENDER_SIZE (256, 384) — trades quality for speed, but must pass quality gates
+- Reduced UNet latent size (32x32, 16x16) — fewer FLOPs, must pass quality
+- Async VAE decode overlapped with next frame's preprocess
 - CoreML prediction configuration options
-- Data type minimization in non-CoreML stages
-- Latent space operation simplification
-- Resolution/quality trade-offs (render_size 384 vs 512)
-- Async patterns within single-frame pipeline
+- Resolution/quality trade-offs with quality validation
 
 ## Timeout and Crash Policy
 

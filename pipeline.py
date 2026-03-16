@@ -29,10 +29,9 @@ import coremltools as ct
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 8         # Encode/decode at 8x8 (1x1 latent, minimum TAESD size)
-OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
-UNET_LATENT_SIZE = 1    # UNet at 1x1 (absolute minimum)
-UNET_SEQ_LEN = 1        # Prompt sequence length (1 token instead of 77)
+RENDER_SIZE = 512
+OUTPUT_SIZE = 512
+LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -114,182 +113,12 @@ def _ensure_vae_decoder(render_size, coreml_dir):
     return path
 
 
-def _ensure_unet(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
-    """Auto-convert UNet for given latent spatial size and sequence length."""
-    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}.mlpackage")
-    if os.path.exists(path):
-        return path
-    import torch
-    from diffusers import UNet2DConditionModel
-    print(f"  Auto-converting UNet ({latent_size}x{latent_size} latent, seq={seq_len})...")
-    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
-
-    class W(torch.nn.Module):
-        def __init__(self, u):
-            super().__init__()
-            self.unet = u
-        def forward(self, sample, timestep, encoder_hidden_states):
-            return self.unet(sample, timestep, encoder_hidden_states).sample
-
-    w = W(unet).eval()
-    s = torch.randn(1, 4, latent_size, latent_size)
-    t = torch.tensor([999])
-    e = torch.randn(1, seq_len, hidden_size)
-    with torch.no_grad():
-        traced = torch.jit.trace(w, (s, t, e))
-    m = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="sample", shape=s.shape, dtype=np.float32),
-            ct.TensorType(name="timestep", shape=t.shape, dtype=np.float16),
-            ct.TensorType(name="encoder_hidden_states", shape=e.shape, dtype=np.float16),
-        ],
-        outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
-        compute_units=ct.ComputeUnit.CPU_AND_GPU,
-        minimum_deployment_target=ct.target.macOS14,
-        convert_to="mlprogram",
-    )
-    m.save(path)
-    del m, traced, w, unet
-    gc.collect()
-    return path
-
-
-def _replace_conv3x3_1x1(module):
-    """Recursively replace Conv2d(3x3, stride=1) with Conv2d(1x1) using center weights."""
-    import torch
-    for name, child in list(module.named_children()):
-        if (isinstance(child, torch.nn.Conv2d) and
-                child.kernel_size[0] == 3 and child.stride[0] == 1):
-            k = 1  # center of 3x3 kernel
-            new_conv = torch.nn.Conv2d(
-                child.in_channels, child.out_channels, kernel_size=1,
-                stride=1, groups=child.groups, bias=child.bias is not None
-            )
-            new_conv.weight.data = child.weight.data[:, :, k:k+1, k:k+1].clone()
-            if child.bias is not None:
-                new_conv.bias.data = child.bias.data.clone()
-            setattr(module, name, new_conv)
-        else:
-            _replace_conv3x3_1x1(child)
-
-
-def _replace_cross_attention(module):
-    """Replace attn2 (cross-attention) blocks with zero output (removes K/V/Q/Out weight loading)."""
-    import torch
-    class ZeroOut(torch.nn.Module):
-        def forward(self, hidden_states, **kwargs):
-            return torch.zeros_like(hidden_states)
-    for name, child in list(module.named_children()):
-        if hasattr(child, 'attn2') and child.attn2 is not None:
-            child.attn2 = ZeroOut()
-        else:
-            _replace_cross_attention(child)
-
-
-def _replace_self_attention(module):
-    """Replace attn1 (self-attention) blocks with zero output (removes Q/K/V/Out weight loading)."""
-    import torch
-    class ZeroOut(torch.nn.Module):
-        def forward(self, hidden_states, **kwargs):
-            return torch.zeros_like(hidden_states)
-    for name, child in list(module.named_children()):
-        if hasattr(child, 'attn1') and child.attn1 is not None:
-            child.attn1 = ZeroOut()
-        else:
-            _replace_self_attention(child)
-
-
-def _ensure_unet_1x1conv(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
-    """Auto-convert UNet with 3x3 stride-1 convs replaced by 1x1 (at 1x1 spatial, 9x fewer weights)."""
-    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_1x1c.mlpackage")
-    if os.path.exists(path):
-        return path
-    import torch
-    from diffusers import UNet2DConditionModel
-    print(f"  Auto-converting 1x1conv UNet ({latent_size}x{latent_size} latent, seq={seq_len})...")
-    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
-    _replace_conv3x3_1x1(unet)
-
-    class W(torch.nn.Module):
-        def __init__(self, u):
-            super().__init__()
-            self.unet = u
-        def forward(self, sample, timestep, encoder_hidden_states):
-            return self.unet(sample, timestep, encoder_hidden_states).sample
-
-    w = W(unet).eval()
-    s = torch.randn(1, 4, latent_size, latent_size)
-    t = torch.tensor([999])
-    e = torch.randn(1, seq_len, hidden_size)
-    with torch.no_grad():
-        traced = torch.jit.trace(w, (s, t, e))
-    m = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="sample", shape=s.shape, dtype=np.float32),
-            ct.TensorType(name="timestep", shape=t.shape, dtype=np.float16),
-            ct.TensorType(name="encoder_hidden_states", shape=e.shape, dtype=np.float16),
-        ],
-        outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
-        compute_units=ct.ComputeUnit.CPU_AND_GPU,
-        minimum_deployment_target=ct.target.macOS14,
-        convert_to="mlprogram",
-    )
-    m.save(path)
-    del m, traced, w, unet
-    gc.collect()
-    return path
-
-
-def _ensure_unet_minimal(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
-    """Auto-convert UNet: 1x1 convs + zero attn1 + zero attn2 (keep only ResNets + FF)."""
-    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_noattn.mlpackage")
-    if os.path.exists(path):
-        return path
-    import torch
-    from diffusers import UNet2DConditionModel
-    print(f"  Auto-converting minimal UNet ({latent_size}x{latent_size} latent, seq={seq_len})...")
-    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
-    _replace_conv3x3_1x1(unet)
-    _replace_cross_attention(unet)
-    _replace_self_attention(unet)
-
-    class W(torch.nn.Module):
-        def __init__(self, u):
-            super().__init__()
-            self.unet = u
-        def forward(self, sample, timestep, encoder_hidden_states):
-            return self.unet(sample, timestep, encoder_hidden_states).sample
-
-    w = W(unet).eval()
-    s = torch.randn(1, 4, latent_size, latent_size)
-    t = torch.tensor([999])
-    e = torch.randn(1, seq_len, hidden_size)
-    with torch.no_grad():
-        traced = torch.jit.trace(w, (s, t, e))
-    m = ct.convert(
-        traced,
-        inputs=[
-            ct.TensorType(name="sample", shape=s.shape, dtype=np.float32),
-            ct.TensorType(name="timestep", shape=t.shape, dtype=np.float16),
-            ct.TensorType(name="encoder_hidden_states", shape=e.shape, dtype=np.float16),
-        ],
-        outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
-        compute_units=ct.ComputeUnit.CPU_AND_GPU,
-        minimum_deployment_target=ct.target.macOS14,
-        convert_to="mlprogram",
-    )
-    m.save(path)
-    del m, traced, w, unet
-    gc.collect()
-    return path
-
-
 class InferencePipeline:
     """CoreML img2img inference pipeline. Optimize this class."""
 
     def __init__(self):
+        import torch
+
         cfg = {
             "sdxs": {
                 "model_id": "IDKiro/sdxs-512-0.9",
@@ -308,81 +137,142 @@ class InferencePipeline:
         print(f"  Model: {MODEL_NAME} ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
-        # Load CoreML models (encoder+decoder skipped: use fixed noise + latent as output)
-        unet_path = _ensure_unet_minimal(
-            UNET_LATENT_SIZE, UNET_SEQ_LEN, cfg["model_id"], cfg["unet_prefix"], cfg["hidden_size"], COREML_DIR
-        )
+        # Load CoreML models
+        enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
+        dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
+        prefix = cfg["unet_prefix"]
+        unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
+        if not os.path.exists(unet_path):
+            raise FileNotFoundError(
+                f"UNet not found: {unet_path}\n"
+                f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
+            )
+
+        self.vae_encoder = ct.models.MLModel(enc_path, compute_units=COMPUTE_UNITS)
+        self.vae_decoder = ct.models.MLModel(dec_path, compute_units=COMPUTE_UNITS)
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
         # Pre-allocated buffers
+        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
+        self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
+        self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._t_buf = np.empty((1,), dtype=np.float16)
-        self._uint8_64 = np.empty((3, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.uint8)     # CHW for postprocess
-        self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # HWC BGR
-        self._output_buf = np.empty((OUTPUT_SIZE, OUTPUT_SIZE, 3), dtype=np.uint8)              # 512x512 final output
+        self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
 
-        # Load scheduler config only (skip full pipeline + text encoder)
-        print("  Loading scheduler config...")
+        # Prompt encoding
+        print("  Loading text encoder...")
+        from diffusers import StableDiffusionPipeline
+        pipe = StableDiffusionPipeline.from_pretrained(
+            cfg["model_id"], torch_dtype=torch.float16
+        ).to("mps")
+
         if cfg["scheduler"] == "euler":
             from diffusers import EulerDiscreteScheduler
-            sched = EulerDiscreteScheduler.from_pretrained(cfg["model_id"], subfolder="scheduler")
-            sched.set_timesteps(1)
-            actual_t = sched.timesteps[0].item()
-            ap = sched.alphas_cumprod[min(int(actual_t), len(sched.alphas_cumprod) - 1)].item()
+            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
+        pipe.scheduler.set_timesteps(1 if cfg["scheduler"] == "euler" else 50, device="mps")
+
+        if cfg["scheduler"] == "euler":
+            actual_t = pipe.scheduler.timesteps[0].cpu().item()
+            self._t_buf[0] = np.float16(actual_t)
+            ap = pipe.scheduler.alphas_cumprod[
+                min(int(actual_t), len(pipe.scheduler.alphas_cumprod) - 1)
+            ].item()
         else:
-            from diffusers import DDPMScheduler
-            sched = DDPMScheduler.from_pretrained(cfg["model_id"], subfolder="scheduler")
-            sched.set_timesteps(50)
             t_idx = max(0, int(50 * (1.0 - STRENGTH)))
-            actual_t = sched.timesteps[t_idx if t_idx < len(sched.timesteps) else 0].item()
-            ap = sched.alphas_cumprod[int(actual_t)].item()
+            if t_idx < len(pipe.scheduler.timesteps):
+                actual_t = pipe.scheduler.timesteps[t_idx].cpu().item()
+            else:
+                actual_t = pipe.scheduler.timesteps[0].cpu().item()
+            self._t_buf[0] = np.float16(actual_t)
+            ap = pipe.scheduler.alphas_cumprod[int(actual_t)].item()
 
-        self._t_buf[0] = np.float16(actual_t)
-        sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
+        self._sqrt_a = np.float32(np.sqrt(ap))
+        self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
+        self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
 
-        # Zero embeddings with reduced sequence length
-        self._prompt_embeds = np.zeros((1, UNET_SEQ_LEN, cfg["hidden_size"]), dtype=np.float16)
+        # Encode prompt
+        with torch.no_grad():
+            ti = pipe.tokenizer(
+                PROMPT, padding="max_length",
+                max_length=pipe.tokenizer.model_max_length,
+                truncation=True, return_tensors="pt",
+            )
+            self._prompt_embeds = pipe.text_encoder(
+                ti.input_ids.to("mps")
+            )[0].cpu().to(torch.float16).numpy()
 
-        # Fixed noise at UNet scale (64x64)
+        del pipe
+        gc.collect()
+        torch.mps.empty_cache()
+
+        # Fixed noise for temporal coherence
         rng = np.random.RandomState(42)
-        fixed_noise = rng.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float32)
-        self._noise_term = (sqrt_1ma * fixed_noise).astype(np.float32)
+        self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float32)
+        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float32)
 
-        # Pre-built CoreML input dict (noise_term used directly as fixed UNet sample)
+        # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
+        self._enc_input = {"image": self._img_buf}
         self._unet_input = {
-            "sample": self._noise_term,
+            "sample": self._lat_buf,
             "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         }
+        self._dec_input = {"latent": self._out_buf}
 
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
         self._warmup()
 
-        # Pre-compute fixed output: input never changes, so UNet result is always the same
-        print("  Pre-computing fixed output...")
-        u = self.unet.predict(self._unet_input)
-        cv2.convertScaleAbs(u["noise_pred"][0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
-        np.copyto(self._bgr_64, self._uint8_64[::-1].transpose(1, 2, 0))
-        cv2.resize(self._bgr_64, (OUTPUT_SIZE, OUTPUT_SIZE), dst=self._output_buf)
-
     def _warmup(self, n=25):
-        unet_dummy = np.random.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float16)
-        emb_dummy = np.random.randn(1, UNET_SEQ_LEN, self._prompt_embeds.shape[2]).astype(np.float16)
+        dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
+        np.copyto(self._img_buf, dummy)
         for _ in range(n):
-            self.unet.predict({
-                "sample": unet_dummy, "timestep": self._t_buf,
-                "encoder_hidden_states": emb_dummy,
+            e = self.vae_encoder.predict({"image": self._img_buf})
+            np.copyto(self._lat_buf, np.array(e["latent"]).astype(np.float16))
+            u = self.unet.predict({
+                "sample": self._lat_buf, "timestep": self._t_buf,
+                "encoder_hidden_states": self._prompt_embeds,
             })
+            np.copyto(self._out_buf, np.array(u["noise_pred"]).astype(np.float16))
+            self.vae_decoder.predict({"latent": self._out_buf})
 
     def process_frame(self, frame_bgr):
-        """Return pre-computed fixed output (UNet input is always the same fixed noise).
+        """Full pipeline: preprocess -> VAE enc -> UNet -> VAE dec -> postprocess.
+
+        This is the hot path. Optimize everything here.
 
         Args:
             frame_bgr: BGR uint8 ndarray, shape (H, W, 3)
         Returns:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
-        return self._output_buf
+        # blobFromImage: center-crop + INTER_NEAREST resize + BGR->RGB + normalize + HWC->NCHW, one C++ call
+        np.copyto(self._img_buf, cv2.dnn.blobFromImage(
+            frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
+            (127.5, 127.5, 127.5), swapRB=True, crop=True))
+
+        # VAE Encode
+        enc = self.vae_encoder.predict(self._enc_input)
+        clean = np.asarray(enc["latent"])  # float32 natively, no conversion
+
+        # Compute noisy directly into _lat_buf (no temp allocation)
+        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
+        np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
+
+        # UNet inference
+        u = self.unet.predict(self._unet_input)
+        npred = np.asarray(u["noise_pred"])  # float32 natively, no conversion
+
+        # Compute denoised directly into _out_buf (no temp allocations)
+        np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
+        np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
+        np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
+
+        # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
+        dec = self.vae_decoder.predict(self._dec_input)
+        chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view, no copy
+        cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
+        return self._uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC view, no copy
 
 
 def create_pipeline():
