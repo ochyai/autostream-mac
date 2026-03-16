@@ -44,7 +44,8 @@ while true; do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    timeout $SONNET_TIMEOUT claude -p "Read program.md thoroughly. You are on branch $BRANCH.
+    # macOS has no `timeout` — use background + sleep + kill
+    claude -p "Read program.md thoroughly. You are on branch $BRANCH.
 
 results.tsv has all experiment history. The CoreML models are in coreml_models/. The Python venv is at .venv/bin/python.
 
@@ -58,7 +59,17 @@ Check quality with: grep 'quality_pass:\|QUALITY_FAIL' run.log
 
 Start the experiment loop NOW. Edit pipeline.py, run '.venv/bin/python benchmark.py > run.log 2>&1', check BOTH speed AND quality results, keep or discard. NEVER STOP. Run experiments until this session ends." \
         --allowedTools 'Edit,Read,Write,Bash,Glob,Grep' \
-        --model sonnet 2>&1 | tee -a autostream.log
+        --model sonnet 2>&1 | tee -a autostream.log &
+    SONNET_PID=$!
+
+    # Wait for timeout or natural exit
+    sleep $SONNET_TIMEOUT && kill $SONNET_PID 2>/dev/null &
+    TIMER_PID=$!
+
+    # Wait for Sonnet to finish (either by timeout kill or natural completion)
+    wait $SONNET_PID 2>/dev/null
+    kill $TIMER_PID 2>/dev/null
+    wait $TIMER_PID 2>/dev/null
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

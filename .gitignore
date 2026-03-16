@@ -5,3 +5,5 @@ coreml_models/
 run.log
 *.mlpackage
 .DS_Store
+output_samples/
+model_variants_results.tsv

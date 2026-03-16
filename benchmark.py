@@ -11,6 +11,8 @@ Quality gates prevent degenerate optimizations:
   - Output must vary with input (no fixed output)
   - Output must have color diversity and spatial structure
   - Output must differ meaningfully from input (no VAE passthrough)
+  - Sample frames are saved to output_samples/ for visual inspection
+  - RENDER_SIZE must be >= 512 (no resolution downgrade tricks)
 
 Usage: python benchmark.py
 """
@@ -27,12 +29,15 @@ N_BENCHMARK = 200   # timed frames
 FRAME_H = 480
 FRAME_W = 640
 SEED = 42
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output_samples")
 
 # ── Quality thresholds ───────────────────────────────────────
 MIN_INPUT_VARIANCE = 0.5     # mean abs pixel diff between outputs for different inputs
-MIN_UNIQUE_COLORS = 1000     # minimum unique colors per output frame (512x512 has 262144 pixels)
+MIN_UNIQUE_COLORS = 10000    # minimum unique colors per 512x512 output (real diffusion: 50k+)
 MIN_SPATIAL_STDDEV = 10.0    # minimum std dev of pixel values (spatial structure)
 MIN_TRANSFORM_DIFF = 20.0    # minimum diff between input and output (prevents VAE passthrough)
+MIN_RENDER_SIZE = 512        # pipeline must process at full resolution (no downscale tricks)
+MIN_EDGE_STRENGTH = 5.0      # minimum edge content (Sobel magnitude, prevents blurry mush)
 
 
 def generate_unique_frames(n, seed):
@@ -96,10 +101,49 @@ def run_benchmark(pipeline):
     }
 
 
+def save_sample_grid(test_frames, outputs):
+    """Save input/output comparison grid as PNG for visual inspection."""
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # Save individual pairs and a comparison grid
+    n = len(test_frames)
+    out_h, out_w = outputs[0].shape[:2]
+
+    for i, (frame, out) in enumerate(zip(test_frames, outputs)):
+        # Center-crop and resize input to match output
+        h, w = frame.shape[:2]
+        if w > h:
+            off = (w - h) // 2
+            sq = frame[:, off:off + h]
+        elif h > w:
+            off = (h - w) // 2
+            sq = frame[off:off + w, :]
+        else:
+            sq = frame
+        inp_resized = cv2.resize(sq, (out_w, out_h))
+
+        # Save individual output
+        cv2.imwrite(os.path.join(OUTPUT_DIR, f"output_{i}.png"), out)
+
+        # Save side-by-side comparison
+        pair = np.hstack([inp_resized, out])
+        cv2.imwrite(os.path.join(OUTPUT_DIR, f"compare_{i}.png"), pair)
+
+    # Save full grid: all inputs on top, all outputs on bottom
+    row_in = np.hstack([cv2.resize(
+        f[:, (f.shape[1]-f.shape[0])//2:(f.shape[1]-f.shape[0])//2+f.shape[0]]
+        if f.shape[1] > f.shape[0] else f, (out_w, out_h))
+        for f in test_frames])
+    row_out = np.hstack(outputs)
+    grid = np.vstack([row_in, row_out])
+    cv2.imwrite(os.path.join(OUTPUT_DIR, "grid.png"), grid)
+    print(f"  Saved {n} sample pairs to {OUTPUT_DIR}/")
+
+
 def check_quality(pipeline):
     """
     Quality checks using completely fresh frames (never seen during benchmark).
-    Catches: caching, fixed output, VAE passthrough, solid colors.
+    Saves visual samples to output_samples/ for human review.
     """
     # Different seed — these frames are completely new to the pipeline
     test_frames = generate_unique_frames(5, SEED + 9999)
@@ -110,8 +154,22 @@ def check_quality(pipeline):
         # copy=True: pipeline may return a view into a reused buffer
         outputs.append(np.array(out, dtype=np.uint8, copy=True))
 
+    # Save visual samples for human inspection
+    save_sample_grid(test_frames, outputs)
+
+    # ── Check 0: Resolution gate ─────────────────────────────
+    # Pipeline must not use RENDER_SIZE < 512. Check via pipeline config.
+    render_size = getattr(pipeline, 'render_size', None)
+    if render_size is None:
+        # Try to read from module
+        try:
+            from pipeline import RENDER_SIZE
+            render_size = RENDER_SIZE
+        except (ImportError, AttributeError):
+            render_size = 512  # assume compliant if we can't detect
+    render_pass = render_size >= MIN_RENDER_SIZE
+
     # ── Check 1: Input sensitivity ───────────────────────────
-    # Outputs for different inputs must differ from each other.
     pair_diffs = []
     for i in range(len(outputs)):
         for j in range(i + 1, len(outputs)):
@@ -122,7 +180,6 @@ def check_quality(pipeline):
     input_pass = input_variance >= MIN_INPUT_VARIANCE
 
     # ── Check 2: Color diversity ─────────────────────────────
-    # Each output must have rich color content (not blocky/flat).
     min_unique = float("inf")
     for out in outputs:
         pixels = out.reshape(-1, 3)
@@ -134,7 +191,6 @@ def check_quality(pipeline):
     color_pass = unique_colors >= MIN_UNIQUE_COLORS
 
     # ── Check 3: Spatial structure ───────────────────────────
-    # Output must have texture, not flat/uniform regions.
     min_stddev = float("inf")
     for out in outputs:
         min_stddev = min(min_stddev, float(np.std(out.astype(np.float32))))
@@ -142,11 +198,8 @@ def check_quality(pipeline):
     struct_pass = spatial_stddev >= MIN_SPATIAL_STDDEV
 
     # ── Check 4: Transformation magnitude ────────────────────
-    # Output must differ meaningfully from input.
-    # Catches VAE passthrough (encode→decode without UNet = reconstruction ≈ input).
     transform_diffs = []
     for frame, out in zip(test_frames, outputs):
-        # Center-crop input to square, resize to output dimensions
         h, w = frame.shape[:2]
         if w > h:
             off = (w - h) // 2
@@ -163,19 +216,36 @@ def check_quality(pipeline):
     transform_diff = float(np.mean(transform_diffs))
     transform_pass = transform_diff >= MIN_TRANSFORM_DIFF
 
+    # ── Check 5: Edge content (anti-blur) ────────────────────
+    # Output must have sharp edges, not blurry mush from extreme downscale+upscale
+    min_edge = float("inf")
+    for out in outputs:
+        gray = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY)
+        sobel_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+        sobel_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+        edge_mag = np.sqrt(sobel_x**2 + sobel_y**2)
+        min_edge = min(min_edge, float(np.mean(edge_mag)))
+    edge_strength = min_edge
+    edge_pass = edge_strength >= MIN_EDGE_STRENGTH
+
     # ── Overall ──────────────────────────────────────────────
-    quality_pass = all([input_pass, color_pass, struct_pass, transform_pass])
+    quality_pass = all([render_pass, input_pass, color_pass,
+                        struct_pass, transform_pass, edge_pass])
 
     return {
         "quality_pass": quality_pass,
+        "render_size": render_size,
         "unique_colors": unique_colors,
         "input_variance": input_variance,
         "spatial_stddev": spatial_stddev,
         "transform_diff": transform_diff,
+        "edge_strength": edge_strength,
+        "render_pass": render_pass,
         "input_pass": input_pass,
         "color_pass": color_pass,
         "struct_pass": struct_pass,
         "transform_pass": transform_pass,
+        "edge_pass": edge_pass,
     }
 
 
@@ -209,13 +279,17 @@ def main():
     print(f"n_frames:       {metrics['n_frames']}")
     print(f"load_secs:      {load_time:.1f}")
     print(f"quality_pass:   {str(quality['quality_pass']).lower()}")
+    print(f"render_size:    {quality['render_size']}")
     print(f"unique_colors:  {quality['unique_colors']}")
     print(f"input_variance: {quality['input_variance']:.2f}")
     print(f"spatial_stddev: {quality['spatial_stddev']:.2f}")
     print(f"transform_diff: {quality['transform_diff']:.2f}")
+    print(f"edge_strength:  {quality['edge_strength']:.2f}")
 
     if not quality["quality_pass"]:
         print("QUALITY_FAIL")
+        if not quality["render_pass"]:
+            print(f"  FAIL: render_size {quality['render_size']} < {MIN_RENDER_SIZE} (no resolution downgrade — optimize the model, not the resolution)")
         if not quality["input_pass"]:
             print(f"  FAIL: input_variance {quality['input_variance']:.2f} < {MIN_INPUT_VARIANCE} (outputs identical for different inputs)")
         if not quality["color_pass"]:
@@ -224,6 +298,8 @@ def main():
             print(f"  FAIL: spatial_stddev {quality['spatial_stddev']:.2f} < {MIN_SPATIAL_STDDEV} (output is flat)")
         if not quality["transform_pass"]:
             print(f"  FAIL: transform_diff {quality['transform_diff']:.2f} < {MIN_TRANSFORM_DIFF} (output too similar to input — is UNet being used?)")
+        if not quality["edge_pass"]:
+            print(f"  FAIL: edge_strength {quality['edge_strength']:.2f} < {MIN_EDGE_STRENGTH} (output is blurry — no sharp detail)")
 
 
 if __name__ == "__main__":
