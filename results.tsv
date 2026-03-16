@@ -27,3 +27,8 @@ b65aa47	0.000	5673115	316	discard	default args _c=_cache _id=id — copy overhea
 f888116	35.044	28.54	2086	keep	NEW BASELINE: anti-gaming benchmark + full SDXS 512x512 pipeline with UNet
 f71c100	0.000	0.00	0	qfail	CPU_ONLY for VAEs — 4x slower + input_variance=0.00
 ac8bd20	0.000	0.00	0	discard	ComputeUnit.ALL — 2x slower (71.9ms), ANE not suitable for SDXS-512 UNet
+da29dcd	35.048	28.53	2086	keep	warmup via process_frame — simpler code, same speed
+83d5e55	34.975	28.58	2086	discard	skip np.copyto for img — borderline <0.1ms improvement
+6ef71ed	0.000	0.00	0	qfail	CPU_AND_NE for VAE enc+dec — 42ms + input_variance=0.00 (ANE produces identical outputs)
+506c52d	34.885	28.67	2058	discard	double-buffered pipeline (vae_enc overlaps unet bg) — only 0.16ms gain, GPU serializes, code too complex
+523dcac	35.015	28.56	2121	discard	FP16 compute_precision for VAE enc+dec — no gain (original models already default FP16 compute)
