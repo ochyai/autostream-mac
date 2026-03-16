@@ -1,0 +1,6 @@
+variant	avg_ms	fps	memory_mb	unique_colors	transform_diff	edge_strength	quality_pass
+unet_pal4	35.006	28.57	2271	235599	67.16	161.32	true
+unet_original	35.008	28.56	1981	65721	58.73	24.22	true
+unet_pal6	35.051	28.53	2312	101368	59.58	30.43	true
+unet_pal2	35.156	28.44	2179	172784	88.32	144.35	true
+unet_int8	41.647	24.01	4170	2271	80.67	1.57	false
