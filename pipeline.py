@@ -187,6 +187,19 @@ def _replace_cross_attention(module):
             _replace_cross_attention(child)
 
 
+def _replace_self_attention(module):
+    """Replace attn1 (self-attention) blocks with zero output (removes Q/K/V/Out weight loading)."""
+    import torch
+    class ZeroOut(torch.nn.Module):
+        def forward(self, hidden_states, **kwargs):
+            return torch.zeros_like(hidden_states)
+    for name, child in list(module.named_children()):
+        if hasattr(child, 'attn1') and child.attn1 is not None:
+            child.attn1 = ZeroOut()
+        else:
+            _replace_self_attention(child)
+
+
 def _ensure_unet_1x1conv(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
     """Auto-convert UNet with 3x3 stride-1 convs replaced by 1x1 (at 1x1 spatial, 9x fewer weights)."""
     path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_1x1c.mlpackage")
@@ -230,8 +243,8 @@ def _ensure_unet_1x1conv(latent_size, seq_len, model_id, prefix, hidden_size, co
 
 
 def _ensure_unet_minimal(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
-    """Auto-convert UNet: 3x3->1x1 convs + zero out cross-attention (remove K/V/Q/Out weights)."""
-    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_minimal.mlpackage")
+    """Auto-convert UNet: 1x1 convs + zero attn1 + zero attn2 (keep only ResNets + FF)."""
+    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_noattn.mlpackage")
     if os.path.exists(path):
         return path
     import torch
@@ -240,6 +253,7 @@ def _ensure_unet_minimal(latent_size, seq_len, model_id, prefix, hidden_size, co
     unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
     _replace_conv3x3_1x1(unet)
     _replace_cross_attention(unet)
+    _replace_self_attention(unet)
 
     class W(torch.nn.Module):
         def __init__(self, u):
