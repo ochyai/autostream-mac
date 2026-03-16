@@ -29,11 +29,11 @@ import coremltools as ct
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 32        # Encode/decode at 32x32 (256x fewer pixels than 512, minimum TAESD size)
+RENDER_SIZE = 16        # Encode/decode at 16x16 (2x2 latent, near-minimal)
 OUTPUT_SIZE = 512       # Output remains 512x512 (resize after decode)
-LATENT_SIZE = RENDER_SIZE // 8   # 4x4 — minimum VAE latent
+LATENT_SIZE = RENDER_SIZE // 8   # 2x2 latent
 UNET_LATENT_SIZE = 64   # UNet always operates at 64x64
-UPSAMPLE_FACTOR = UNET_LATENT_SIZE // LATENT_SIZE  # 16 for 32-res
+UPSAMPLE_FACTOR = UNET_LATENT_SIZE // LATENT_SIZE  # 32 for 16-res
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5

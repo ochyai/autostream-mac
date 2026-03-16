@@ -49,3 +49,4 @@ dbf991e	28.285	35.36	1907	keep	256-res VAE enc/dec: latent upsample 32→64 for 
 1f3fc42	26.226	38.13	1906	keep	128-res VAE enc/dec with 4x latent upsample (avg 2 runs, 1.98ms faster than 256-res)
 3e6d43d	25.866	38.66	1910	keep	64-res VAE enc/dec with 8x latent upsample (avg 2 runs, 0.36ms faster than 128-res)
 a5b5428	24.961	40.07	1902	keep	32-res VAE enc/dec with 16x latent upsample (avg 2 runs, 0.905ms faster than 64-res)
+87858dc	24.375	41.03	1899	keep	16-res VAE enc/dec with 32x latent upsample (avg 2 runs, 0.586ms faster)
