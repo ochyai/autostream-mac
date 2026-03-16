@@ -29,8 +29,8 @@ import coremltools as ct
 COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_models")
 
 # ── Configuration ────────────────────────────────────────────
-RENDER_SIZE = 32
-OUTPUT_SIZE = 32
+RENDER_SIZE = 16
+OUTPUT_SIZE = 16
 LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"

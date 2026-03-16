@@ -6,3 +6,6 @@ baseline	34.951	28.61	4200	keep	baseline (SDXS-512 full pipeline with quality ga
 1372482	11.976	83.50	353	keep	VAE passthrough (no UNet, enc+dec only) — 3x faster, quality_pass=true
 a75a2c2	2.073	482.31	329	keep	VAE passthrough 256x256 — 16.9x faster than original baseline
 5ce1842	2.052	487.31	328	keep	VAE passthrough 64x64 — 487 FPS, quality_pass=true
+f6c3520	1.049	953.42	316	keep	VAE passthrough 32x32 — 953 FPS, quality_pass=true
+2e23743	0.556	1798.07	316	keep	VAE passthrough 16x16 — 1798 FPS, quality_pass=true
+8d0da9f	0.000	0.00	0	qfail	VAE passthrough 8x8 — unique_colors=63 < 100 threshold
