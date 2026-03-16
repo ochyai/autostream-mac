@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+coreml_models/
+run.log
+*.mlpackage
+.DS_Store
