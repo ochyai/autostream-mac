@@ -37,3 +37,4 @@ e955096	31.340	31.91	2075	keep	stride-2 subsample 64x64→32x32 latent + 256x256
 dc64d31	30.199	33.11	2067	keep	stride-8 subsample 64x64→8x8 latent + 64x64 VAE decoder — 33.11 FPS
 3cc9d8a	0.000	0.00	0	qfail	stride-16 subsample 64x64→4x4 latent + 32x32 VAE decoder — unique_colors=876 < 1000
 7e91668	19.871	50.32	2032	keep	32x32 UNet (stride-2 from 64x64 enc) + 256x256 decoder — 50 FPS! quality_pass=true
+7f5c1bd	17.165	58.26	2016	keep	16x16 UNet (stride-4 from 64x64 enc) + 128x128 decoder — 58 FPS

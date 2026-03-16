@@ -30,8 +30,8 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 512
-OUTPUT_SIZE = 256
-LATENT_SIZE = 32   # 32x32 UNet latent (unet_sdxs_512_32)
+OUTPUT_SIZE = 128
+LATENT_SIZE = 16   # 16x16 UNet latent (unet_sdxs_512_16)
 ENC_LATENT = RENDER_SIZE // 8  # 64 — actual VAE encoder output size
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
@@ -249,8 +249,8 @@ class InferencePipeline:
         enc = self.vae_encoder.predict(self._enc_input)
         clean64 = np.asarray(enc["latent"])  # (1,4,64,64) float32 view
 
-        # Stride-2 subsample 64x64 → 32x32 for 32x32 UNet, add noise
-        np.multiply(self._sqrt_a, clean64[:, :, ::2, ::2], out=self._lat_buf)
+        # Stride-4 subsample 64x64 → 16x16 for 16x16 UNet, add noise
+        np.multiply(self._sqrt_a, clean64[:, :, ::4, ::4], out=self._lat_buf)
         np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
 
         # UNet inference
