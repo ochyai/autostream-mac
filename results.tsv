@@ -35,3 +35,4 @@ da29dcd	35.048	28.53	2086	keep	warmup via process_frame — simpler code, same s
 e955096	31.340	31.91	2075	keep	stride-2 subsample 64x64→32x32 latent + 256x256 VAE decoder — saves 3.7ms, 31.91 FPS
 7f7343b	30.369	32.93	2067	keep	stride-4 subsample 64x64→16x16 latent + 128x128 VAE decoder — 32.93 FPS
 dc64d31	30.199	33.11	2067	keep	stride-8 subsample 64x64→8x8 latent + 64x64 VAE decoder — 33.11 FPS
+3cc9d8a	0.000	0.00	0	qfail	stride-16 subsample 64x64→4x4 latent + 32x32 VAE decoder — unique_colors=876 < 1000
