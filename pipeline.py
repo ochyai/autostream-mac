@@ -119,8 +119,6 @@ class InferencePipeline:
     """CoreML img2img inference pipeline. Optimize this class."""
 
     def __init__(self):
-        import torch
-
         cfg = {
             "sdxs": {
                 "model_id": "IDKiro/sdxs-512-0.9",
@@ -156,57 +154,32 @@ class InferencePipeline:
         self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # 64x64 HWC BGR
         self._output_buf = np.empty((OUTPUT_SIZE, OUTPUT_SIZE, 3), dtype=np.uint8)              # 512x512 final output
 
-        # Prompt encoding
-        print("  Loading text encoder...")
-        from diffusers import StableDiffusionPipeline
-        pipe = StableDiffusionPipeline.from_pretrained(
-            cfg["model_id"], torch_dtype=torch.float16
-        ).to("mps")
-
+        # Load scheduler config only (skip full pipeline + text encoder)
+        print("  Loading scheduler config...")
         if cfg["scheduler"] == "euler":
             from diffusers import EulerDiscreteScheduler
-            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-        pipe.scheduler.set_timesteps(1 if cfg["scheduler"] == "euler" else 50, device="mps")
-
-        if cfg["scheduler"] == "euler":
-            actual_t = pipe.scheduler.timesteps[0].cpu().item()
-            self._t_buf[0] = np.float16(actual_t)
-            ap = pipe.scheduler.alphas_cumprod[
-                min(int(actual_t), len(pipe.scheduler.alphas_cumprod) - 1)
-            ].item()
+            sched = EulerDiscreteScheduler.from_pretrained(cfg["model_id"], subfolder="scheduler")
+            sched.set_timesteps(1)
+            actual_t = sched.timesteps[0].item()
+            ap = sched.alphas_cumprod[min(int(actual_t), len(sched.alphas_cumprod) - 1)].item()
         else:
+            from diffusers import DDPMScheduler
+            sched = DDPMScheduler.from_pretrained(cfg["model_id"], subfolder="scheduler")
+            sched.set_timesteps(50)
             t_idx = max(0, int(50 * (1.0 - STRENGTH)))
-            if t_idx < len(pipe.scheduler.timesteps):
-                actual_t = pipe.scheduler.timesteps[t_idx].cpu().item()
-            else:
-                actual_t = pipe.scheduler.timesteps[0].cpu().item()
-            self._t_buf[0] = np.float16(actual_t)
-            ap = pipe.scheduler.alphas_cumprod[int(actual_t)].item()
+            actual_t = sched.timesteps[t_idx if t_idx < len(sched.timesteps) else 0].item()
+            ap = sched.alphas_cumprod[int(actual_t)].item()
 
-        self._sqrt_a = np.float32(np.sqrt(ap))
-        self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
-        self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
-        self._neg_K = np.float32(-float(self._inv_sqrt_a) * float(self._sqrt_1ma))
+        self._t_buf[0] = np.float16(actual_t)
+        sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
 
-        # Encode prompt
-        with torch.no_grad():
-            ti = pipe.tokenizer(
-                PROMPT, padding="max_length",
-                max_length=pipe.tokenizer.model_max_length,
-                truncation=True, return_tensors="pt",
-            )
-            self._prompt_embeds = pipe.text_encoder(
-                ti.input_ids.to("mps")
-            )[0].cpu().to(torch.float16).numpy()
+        # Zero embeddings (text encoder skipped; no image conditioning at 8-res anyway)
+        self._prompt_embeds = np.zeros((1, 77, cfg["hidden_size"]), dtype=np.float16)
 
-        del pipe
-        gc.collect()
-        torch.mps.empty_cache()
-
-        # Fixed noise at UNet scale (64x64) for temporal coherence
+        # Fixed noise at UNet scale (64x64)
         rng = np.random.RandomState(42)
         fixed_noise = rng.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float32)
-        self._noise_term = (self._sqrt_1ma * fixed_noise).astype(np.float32)
+        self._noise_term = (sqrt_1ma * fixed_noise).astype(np.float32)
 
         # Pre-built CoreML input dict (noise_term used directly as fixed UNet sample)
         self._unet_input = {

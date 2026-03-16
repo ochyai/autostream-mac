@@ -59,3 +59,5 @@ dedc435	23.896	41.85	1881	keep	cv2.addWeighted for denoise: fuse 3 numpy ops int
 6e248c5	23.856	41.92	1877	keep	skip VAE encoder: noise_term as fixed UNet input (avg 2 runs, 0.040ms faster + major simplification)
 0ab6f46	23.664	42.26	1873	keep	skip VAE decoder: use 64x64 denoised latent as output colors (avg 2 runs, 0.192ms faster)
 9aa2363	23.662	42.27	1873	keep	skip addWeighted denoise: use npred directly as colors, remove out_buf (avg 2 runs, 0.002ms + simplification)
+043a1d5	23.702	42.19	1875	discard	remove channel reversal [::-1] (0.040ms slower — negative stride in numpy is fine)
+a6317e4	23.686	42.22	1029	keep	skip text encoder: zero embeddings + scheduler-only load (avg 2 runs, 0.024ms within noise; -845MB memory, -5s load)
