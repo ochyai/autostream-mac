@@ -255,7 +255,7 @@ class InferencePipeline:
 
         # VAE Encode
         enc = self.vae_encoder.predict({"image": self._img_buf})
-        clean = np.array(enc["latent"]).astype(np.float16)
+        clean = np.asarray(enc["latent"], dtype=np.float16)
 
         # Latent feedback from previous frame
         if self._prev_denoised is not None and LATENT_FEEDBACK > 0:
@@ -271,7 +271,7 @@ class InferencePipeline:
             "sample": self._lat_buf, "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         })
-        npred = np.array(u["noise_pred"]).astype(np.float16)
+        npred = np.asarray(u["noise_pred"], dtype=np.float16)
         denoised = (noisy - self._sqrt_1ma * npred) / self._sqrt_a
 
         self._prev_denoised = denoised.copy()
@@ -279,7 +279,7 @@ class InferencePipeline:
 
         # VAE Decode
         dec = self.vae_decoder.predict({"latent": self._out_buf})
-        r = np.array(dec["image"]).astype(np.float32).squeeze(0).transpose(1, 2, 0)
+        r = np.asarray(dec["image"], dtype=np.float32).squeeze(0).transpose(1, 2, 0)
         r = ((r + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
 
         if r.shape[0] != OUTPUT_SIZE:

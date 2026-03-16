@@ -1,2 +1,3 @@
 commit	avg_ms	fps	memory_mb	status	description
 baseline	39.230	25.49	1891	keep	baseline (SDXS-512 CoreML CPU_AND_GPU on M3 Ultra 512GB)
+92f9f94	39.094	25.61	1890	keep	use np.asarray to avoid redundant copies from CoreML predictions
