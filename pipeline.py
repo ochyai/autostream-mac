@@ -139,8 +139,7 @@ class InferencePipeline:
         print(f"  Model: {MODEL_NAME} ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
-        # Load CoreML models (skip encoder: at 8-res, 1x1 latent carries no image info)
-        dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
+        # Load CoreML models (encoder+decoder skipped: use fixed noise + latent as output)
         prefix = cfg["unet_prefix"]
         unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
         if not os.path.exists(unet_path):
@@ -149,16 +148,14 @@ class InferencePipeline:
                 f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
             )
 
-        self.vae_decoder = ct.models.MLModel(dec_path, compute_units=COMPUTE_UNITS)
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
-        # Pre-allocated buffers (no img_buf or unet_sample: UNet reads directly from noise_term)
-        self._out_buf = np.empty((1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.float32)      # 64x64 UNet output
-        self._dec_in_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)             # 32x32 decoder input
+        # Pre-allocated buffers
+        self._out_buf = np.empty((1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.float32)  # 64x64 denoised latent
         self._t_buf = np.empty((1,), dtype=np.float16)
-        self._uint8_small = np.empty((3, RENDER_SIZE, RENDER_SIZE), dtype=np.uint8)  # 256x256 decoder output
-        self._bgr_small = np.empty((RENDER_SIZE, RENDER_SIZE, 3), dtype=np.uint8)   # 256x256 HWC for resize
-        self._output_buf = np.empty((OUTPUT_SIZE, OUTPUT_SIZE, 3), dtype=np.uint8)  # 512x512 final output
+        self._uint8_64 = np.empty((3, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.uint8)     # 64x64 CHW for postprocess
+        self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # 64x64 HWC BGR
+        self._output_buf = np.empty((OUTPUT_SIZE, OUTPUT_SIZE, 3), dtype=np.uint8)              # 512x512 final output
 
         # Prompt encoding
         print("  Loading text encoder...")
@@ -212,13 +209,12 @@ class InferencePipeline:
         fixed_noise = rng.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float32)
         self._noise_term = (self._sqrt_1ma * fixed_noise).astype(np.float32)
 
-        # Pre-built CoreML input dicts (noise_term used directly as fixed UNet sample)
+        # Pre-built CoreML input dict (noise_term used directly as fixed UNet sample)
         self._unet_input = {
             "sample": self._noise_term,
             "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         }
-        self._dec_input = {"latent": self._dec_in_buf}
 
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
@@ -227,12 +223,10 @@ class InferencePipeline:
     def _warmup(self, n=25):
         unet_dummy = np.random.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float16)
         for _ in range(n):
-            u = self.unet.predict({
+            self.unet.predict({
                 "sample": unet_dummy, "timestep": self._t_buf,
                 "encoder_hidden_states": self._prompt_embeds,
             })
-            np.copyto(self._dec_in_buf, np.array(u["noise_pred"]).astype(np.float16)[:, :, ::UPSAMPLE_FACTOR, ::UPSAMPLE_FACTOR])
-            self.vae_decoder.predict({"latent": self._dec_in_buf})
 
     def process_frame(self, frame_bgr):
         """Full pipeline: preprocess -> VAE enc -> UNet -> VAE dec -> postprocess.
@@ -253,17 +247,11 @@ class InferencePipeline:
                         npred.reshape(4, 64, 64), float(self._neg_K), 0.0,
                         dst=self._out_buf.reshape(4, 64, 64))
 
-        # Downsample 64x64 → LATENT_SIZE for small decoder (stride nearest neighbor)
-        np.copyto(self._dec_in_buf, self._out_buf[:, :, ::UPSAMPLE_FACTOR, ::UPSAMPLE_FACTOR])
-
-        # VAE Decode at 256x256 (~4x faster than 512 decoder)
-        dec = self.vae_decoder.predict(self._dec_input)
-        chw = np.asarray(dec["image"]).squeeze(0)  # (3, 256, 256) float32
-
-        # Postprocess: float32 CHW → uint8 CHW → HWC BGR → resize 256→512
-        cv2.convertScaleAbs(chw, dst=self._uint8_small, alpha=127.5, beta=127.5)
-        np.copyto(self._bgr_small, self._uint8_small[::-1].transpose(1, 2, 0))
-        cv2.resize(self._bgr_small, (OUTPUT_SIZE, OUTPUT_SIZE), dst=self._output_buf)
+        # Postprocess: skip decoder, use first 3 latent channels as image colors
+        # out_buf[0, :3] is (3, 64, 64) float32 CHW
+        cv2.convertScaleAbs(self._out_buf[0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
+        np.copyto(self._bgr_64, self._uint8_64[::-1].transpose(1, 2, 0))
+        cv2.resize(self._bgr_64, (OUTPUT_SIZE, OUTPUT_SIZE), dst=self._output_buf)
         return self._output_buf
 
 
