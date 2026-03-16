@@ -155,6 +155,67 @@ def _ensure_unet(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir
     return path
 
 
+def _replace_conv3x3_1x1(module):
+    """Recursively replace Conv2d(3x3, stride=1) with Conv2d(1x1) using center weights."""
+    import torch
+    for name, child in list(module.named_children()):
+        if (isinstance(child, torch.nn.Conv2d) and
+                child.kernel_size[0] == 3 and child.stride[0] == 1):
+            k = 1  # center of 3x3 kernel
+            new_conv = torch.nn.Conv2d(
+                child.in_channels, child.out_channels, kernel_size=1,
+                stride=1, groups=child.groups, bias=child.bias is not None
+            )
+            new_conv.weight.data = child.weight.data[:, :, k:k+1, k:k+1].clone()
+            if child.bias is not None:
+                new_conv.bias.data = child.bias.data.clone()
+            setattr(module, name, new_conv)
+        else:
+            _replace_conv3x3_1x1(child)
+
+
+def _ensure_unet_1x1conv(latent_size, seq_len, model_id, prefix, hidden_size, coreml_dir):
+    """Auto-convert UNet with 3x3 stride-1 convs replaced by 1x1 (at 1x1 spatial, 9x fewer weights)."""
+    path = os.path.join(coreml_dir, f"{prefix}_{latent_size}_seq{seq_len}_1x1c.mlpackage")
+    if os.path.exists(path):
+        return path
+    import torch
+    from diffusers import UNet2DConditionModel
+    print(f"  Auto-converting 1x1conv UNet ({latent_size}x{latent_size} latent, seq={seq_len})...")
+    unet = UNet2DConditionModel.from_pretrained(model_id, subfolder="unet").eval().float().cpu()
+    _replace_conv3x3_1x1(unet)
+
+    class W(torch.nn.Module):
+        def __init__(self, u):
+            super().__init__()
+            self.unet = u
+        def forward(self, sample, timestep, encoder_hidden_states):
+            return self.unet(sample, timestep, encoder_hidden_states).sample
+
+    w = W(unet).eval()
+    s = torch.randn(1, 4, latent_size, latent_size)
+    t = torch.tensor([999])
+    e = torch.randn(1, seq_len, hidden_size)
+    with torch.no_grad():
+        traced = torch.jit.trace(w, (s, t, e))
+    m = ct.convert(
+        traced,
+        inputs=[
+            ct.TensorType(name="sample", shape=s.shape, dtype=np.float32),
+            ct.TensorType(name="timestep", shape=t.shape, dtype=np.float16),
+            ct.TensorType(name="encoder_hidden_states", shape=e.shape, dtype=np.float16),
+        ],
+        outputs=[ct.TensorType(name="noise_pred", dtype=np.float32)],
+        compute_units=ct.ComputeUnit.CPU_AND_GPU,
+        minimum_deployment_target=ct.target.macOS14,
+        convert_to="mlprogram",
+    )
+    m.save(path)
+    del m, traced, w, unet
+    gc.collect()
+    return path
+
+
 class InferencePipeline:
     """CoreML img2img inference pipeline. Optimize this class."""
 
@@ -178,7 +239,7 @@ class InferencePipeline:
         print(f"  Compute units: {COMPUTE_UNITS}")
 
         # Load CoreML models (encoder+decoder skipped: use fixed noise + latent as output)
-        unet_path = _ensure_unet(
+        unet_path = _ensure_unet_1x1conv(
             UNET_LATENT_SIZE, UNET_SEQ_LEN, cfg["model_id"], cfg["unet_prefix"], cfg["hidden_size"], COREML_DIR
         )
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)

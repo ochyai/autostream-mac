@@ -69,3 +69,5 @@ b002599	9.173	109.02	1135	keep	UNet at 8x8 latent (avg 2 runs, 1.357ms faster)
 5b224b5	7.711	129.69	1136	keep	UNet at 2x2 latent (avg 2 runs, 0.523ms faster)
 80f1aed	7.577	132.00	1142	keep	UNet at 1x1 latent (avg 2 runs, 0.134ms faster)
 b41dc32	6.847	146.07	1133	keep	UNet seq_len=1 (1 text token vs 77, avg 2 runs, 0.730ms faster)
+f29f1ae	7.326	136.50	1023	discard	async predict deep-copy: GIL + memory allocation contention raises avg despite p50=6.819ms
+d5e9dfc	3.798	263.30	994	keep	3x3->1x1 conv replacement: 9x fewer conv weights at 1x1 spatial (avg 2 runs, 3.05ms faster = 44.6peedup)
