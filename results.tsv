@@ -1,0 +1,2 @@
+commit	avg_ms	fps	memory_mb	status	description
+baseline	39.230	25.49	1891	keep	baseline (SDXS-512 CoreML CPU_AND_GPU on M3 Ultra 512GB)
