@@ -154,8 +154,8 @@ class InferencePipeline:
 
         # Pre-allocated buffers
         self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float16)
-        self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
-        self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
+        self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
+        self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
         self._resized_buf = np.empty((RENDER_SIZE, RENDER_SIZE, 3), dtype=np.uint8)
@@ -190,9 +190,9 @@ class InferencePipeline:
             self._t_buf[0] = np.float16(actual_t)
             ap = pipe.scheduler.alphas_cumprod[int(actual_t)].item()
 
-        self._sqrt_a = np.float16(np.sqrt(ap))
-        self._sqrt_1ma = np.float16(np.sqrt(1.0 - ap))
-        self._inv_sqrt_a = np.float16(1.0 / float(self._sqrt_a))
+        self._sqrt_a = np.float32(np.sqrt(ap))
+        self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
+        self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
 
         # Encode prompt
         with torch.no_grad():
@@ -211,8 +211,8 @@ class InferencePipeline:
 
         # Fixed noise for temporal coherence
         rng = np.random.RandomState(42)
-        self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float16)
-        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float16)
+        self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float32)
+        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float32)
 
         # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
         self._enc_input = {"image": self._img_buf}
@@ -267,7 +267,7 @@ class InferencePipeline:
 
         # VAE Encode
         enc = self.vae_encoder.predict(self._enc_input)
-        clean = np.asarray(enc["latent"], dtype=np.float16)
+        clean = np.asarray(enc["latent"])  # float32 natively, no conversion
 
         # Compute noisy directly into _lat_buf (no temp allocation)
         np.multiply(self._sqrt_a, clean, out=self._lat_buf)
@@ -275,7 +275,7 @@ class InferencePipeline:
 
         # UNet inference
         u = self.unet.predict(self._unet_input)
-        npred = np.asarray(u["noise_pred"], dtype=np.float16)
+        npred = np.asarray(u["noise_pred"])  # float32 natively, no conversion
 
         # Compute denoised directly into _out_buf (no temp allocations)
         np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
