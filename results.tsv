@@ -37,3 +37,8 @@ f96383e	35.089	28.50	1888	discard	fix warmup dtypes to f32 (slightly slower — 
 db7a54b	35.073	28.52	1892	discard	float32 img_buf+LUT retry (2 runs avg 35.073ms, consistently slower by 0.049ms)
 2645bd4	35.082	28.50	1890	discard	float32 prompt embeddings (f16 cast removal — f32 emb slower by 0.058ms in full pipeline)
 e3071e0	34.951	28.61	1891	keep	cv2.dnn.blobFromImage f32: crop+resize+BGR2RGB+norm+NCHW in one C++ call (avg 2 runs)
+82d15fe	35.019	28.56	1885	discard	skip 3MB np.copyto: dict update + per-frame alloc GC overhead outweighs copy savings
+65f77fd	35.028	28.55	1889	discard	reformulate denoise as clean+k*(noise-npred): _lat_buf read not a bottleneck
+5115795	34.943	28.62	1890	discard	INTER_NEAREST resize + blobFromImage no-resize: 0.006ms noise, adds complexity
+cb1d5c4	35.068	28.52	1892	discard	warmup with real benchmark frames (worse: benchmark warmup sufficient, abstract warmup better for CoreML JIT)
+4240898	35.047	28.54	1893	discard	simplify: remove self._fixed_noise member and np.asarray() no-ops (avg 2 runs, 0.096ms worse — within noise but technically higher)
