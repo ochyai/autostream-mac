@@ -30,7 +30,7 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 512
-OUTPUT_SIZE = 512
+OUTPUT_SIZE = 256
 LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
@@ -139,7 +139,7 @@ class InferencePipeline:
 
         # Load CoreML models
         enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
-        dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
+        dec_path = _ensure_vae_decoder(OUTPUT_SIZE, COREML_DIR)
         prefix = cfg["unet_prefix"]
         unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
         if not os.path.exists(unet_path):
@@ -156,6 +156,7 @@ class InferencePipeline:
         self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
+        self._dec32_buf = np.empty((1, 4, OUTPUT_SIZE // 8, OUTPUT_SIZE // 8), dtype=np.float32)
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
 
@@ -217,7 +218,7 @@ class InferencePipeline:
             "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         }
-        self._dec_input = {"latent": self._out_buf}
+        self._dec_input = {"latent": self._dec32_buf}
 
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
@@ -260,6 +261,9 @@ class InferencePipeline:
         np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
         np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
+
+        # Stride-2 subsample 64x64 latent → 32x32 for 256x256 VAE decoder
+        np.copyto(self._dec32_buf, self._out_buf[:, :, ::2, ::2])
 
         # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
         dec = self.vae_decoder.predict(self._dec_input)
