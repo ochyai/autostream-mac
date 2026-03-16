@@ -168,7 +168,7 @@ class InferencePipeline:
         dec = self.vae_decoder.predict(self._dec_input)
         chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view
         cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
-        return self._uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC view, no copy
+        return np.ascontiguousarray(self._uint8_chw[::-1].transpose(1, 2, 0))
 
 
 def create_pipeline():

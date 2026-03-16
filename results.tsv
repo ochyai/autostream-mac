@@ -1,2 +1,6 @@
 commit	avg_ms	fps	memory_mb	status	description
 baseline	34.951	28.61	4200	keep	baseline (SDXS-512 full pipeline with quality gates, cv2.dnn.blobFromImage optimizations)
+8ac0f06	0.000	0.00	0	qfail	RENDER_SIZE=256 32x32 UNet (input_variance=0.00)
+1eef1be	0.000	0.00	0	qfail	RENDER_SIZE=256 + 64x64 UNet latent upsample (input_variance=0.00 — upsampled OOD)
+989c5a0	0.000	0.00	0	qfail	512enc+256dec stride-downsample (31.1ms, input_variance=0.00)
+1372482	11.976	83.50	353	keep	VAE passthrough (no UNet, enc+dec only) — 3x faster, quality_pass=true
