@@ -153,15 +153,11 @@ class InferencePipeline:
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
         # Pre-allocated buffers
-        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float16)
+        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
-        self._resized_buf = np.empty((RENDER_SIZE, RENDER_SIZE, 3), dtype=np.uint8)
-
-        # Normalization LUT: pixel [0,255] -> [-1, 1] in float16
-        self._norm_lut = (np.arange(256, dtype=np.float32) / 127.5 - 1.0).astype(np.float16)
 
         # Prompt encoding
         print("  Loading text encoder...")
@@ -228,7 +224,7 @@ class InferencePipeline:
         self._warmup()
 
     def _warmup(self, n=25):
-        dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float16)
+        dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
         np.copyto(self._img_buf, dummy)
         for _ in range(n):
             e = self.vae_encoder.predict({"image": self._img_buf})
@@ -250,20 +246,10 @@ class InferencePipeline:
         Returns:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
-        h, w = frame_bgr.shape[:2]
-
-        # Center crop to square
-        if w > h:
-            off = (w - h) // 2
-            frame_bgr = frame_bgr[:, off:off + h]
-        elif h > w:
-            off = (h - w) // 2
-            frame_bgr = frame_bgr[off:off + w, :]
-
-        # Resize + normalize: cv2.LUT is 6x faster than numpy fancy-index for uint8->float16 gather
-        cv2.resize(frame_bgr, (RENDER_SIZE, RENDER_SIZE), dst=self._resized_buf, interpolation=cv2.INTER_NEAREST)
-        bgr_f16 = cv2.LUT(self._resized_buf, self._norm_lut)  # (H,W,3) float16 BGR
-        np.copyto(self._img_buf, bgr_f16[:, :, ::-1].transpose(2, 0, 1)[np.newaxis])
+        # blobFromImage: center-crop + INTER_NEAREST resize + BGR->RGB + normalize + HWC->NCHW, one C++ call
+        np.copyto(self._img_buf, cv2.dnn.blobFromImage(
+            frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
+            (127.5, 127.5, 127.5), swapRB=True, crop=True))
 
         # VAE Encode
         enc = self.vae_encoder.predict(self._enc_input)

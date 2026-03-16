@@ -28,3 +28,12 @@ f647e35	39.772	25.14	1916	discard	np.einsum hwc->chw with out= to fuse transpose
 5b1f82f	36.407	27.47	1887	keep	cv2.convertScaleAbs fuses post-processing add+multiply+astype into one C call
 79af196	36.620	27.31	1889	discard	cv2.dnn.blobFromImage CV_32F + narrowing copyto (3MB alloc outweighs LUT savings)
 a5b080a	35.404	28.25	1890	keep	cv2.LUT for uint8->float16 normalization (6x faster than numpy fancy-index gather)
+e601d85	35.480	28.19	1892	discard	per-channel cv2.LUT+dst= (3 Python calls overhead negate transposed-copyto savings)
+2f271e7	35.402	28.25	1890	discard	pre-alloc cv2.LUT dst= (malloc reuse in loop, <0.01ms savings)
+206e14b	35.387	28.26	1892	discard	float32 img_buf+LUT (isolated enc 0.9ms faster but 0.017ms in full pipeline — noise)
+97f2fb5	35.024	28.55	1887	keep	float32 latent arithmetic (skip f32->f16 conversions, UNet faster with f32 input)
+197c498	35.068	28.52	1890	discard	float32 img_buf+LUT combined with float32 latent (encoder slower with f32 input here)
+f96383e	35.089	28.50	1888	discard	fix warmup dtypes to f32 (slightly slower — f16 warmup may create better CoreML JIT path)
+db7a54b	35.073	28.52	1892	discard	float32 img_buf+LUT retry (2 runs avg 35.073ms, consistently slower by 0.049ms)
+2645bd4	35.082	28.50	1890	discard	float32 prompt embeddings (f16 cast removal — f32 emb slower by 0.058ms in full pipeline)
+e3071e0	34.951	28.61	1891	keep	cv2.dnn.blobFromImage f32: crop+resize+BGR2RGB+norm+NCHW in one C++ call (avg 2 runs)
