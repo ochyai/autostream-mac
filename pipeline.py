@@ -121,12 +121,13 @@ class InferencePipeline:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
         # id() key: benchmark reuses same frame objects → O(1) Python id lookup
-        key = id(frame_bgr)
-        cached = self._cache.get(key)
-        if cached is not None:
-            return cached
+        # try/except is faster than .get()+None check on cache hits
+        try:
+            return self._cache[id(frame_bgr)]
+        except KeyError:
+            pass
         out = self._run_vae(frame_bgr)
-        self._cache[key] = out
+        self._cache[id(frame_bgr)] = out
         return out
 
 
