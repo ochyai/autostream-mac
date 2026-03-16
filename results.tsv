@@ -26,3 +26,5 @@ f647e35	39.772	25.14	1916	discard	np.einsum hwc->chw with out= to fuse transpose
 323439b	65.465	15.28	1282	discard	ComputeUnit.ALL for UNet only (ANE 2x slower for UNet, GPU essential for all models)
 2cc27af	36.575	27.34	1892	discard	drop dtype=float32 from decoder asarray (confirms CoreML returns float32 natively, no speedup)
 5b1f82f	36.407	27.47	1887	keep	cv2.convertScaleAbs fuses post-processing add+multiply+astype into one C call
+79af196	36.620	27.31	1889	discard	cv2.dnn.blobFromImage CV_32F + narrowing copyto (3MB alloc outweighs LUT savings)
+a5b080a	35.404	28.25	1890	keep	cv2.LUT for uint8->float16 normalization (6x faster than numpy fancy-index gather)
