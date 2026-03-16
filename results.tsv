@@ -42,3 +42,4 @@ e3071e0	34.951	28.61	1891	keep	cv2.dnn.blobFromImage f32: crop+resize+BGR2RGB+no
 5115795	34.943	28.62	1890	discard	INTER_NEAREST resize + blobFromImage no-resize: 0.006ms noise, adds complexity
 cb1d5c4	35.068	28.52	1892	discard	warmup with real benchmark frames (worse: benchmark warmup sufficient, abstract warmup better for CoreML JIT)
 4240898	35.047	28.54	1893	discard	simplify: remove self._fixed_noise member and np.asarray() no-ops (avg 2 runs, 0.096ms worse — within noise but technically higher)
+dbf991e	28.285	35.36	1907	keep	256-res VAE enc/dec: latent upsample 32→64 for UNet, downsample 64→32 for decoder, resize output 256→512 (avg 2 runs, 6.7ms savings)
