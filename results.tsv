@@ -9,3 +9,8 @@ f93488f	39.334	25.42	1887	discard	cv2.dnn.blobFromImage preprocessing (INTER_LIN
 19bf8d3	38.986	25.65	1886	discard	in-place feedback blend into _lat_buf (5 numpy calls outweigh 3 alloc savings)
 42a58f5	37.560	26.62	1885	keep	pre-build CoreML input dicts in init (avoid per-frame dict alloc + coremltools overhead)
 3de38a1	37.335	26.78	1887	keep	CHW post-processing with pre-alloc buffer, return BGR view (skip cvtColor, avoid 3 float32 allocs)
+e5f3e2b	42.607	23.47	1889	discard	float16 view for VAE decode + mixed np.add (float16+float32->float32 slow)
+780acb6	37.361	26.76	1892	discard	pre-alloc uint8 + np.copyto(unsafe) slower than astype for float32->uint8
+aef18c3	37.476	26.68	1890	discard	np.take per channel into CHW (3 calls overhead outweighs 1 fancy-index + copyto)
+15d6326	40.039	24.98	1890	discard	np.copyto float16->float32 widening (asarray dtype=float32 is faster)
+071b527	37.291	26.91	1890	keep	LATENT_FEEDBACK=0, remove all feedback code (simpler pipeline, 11 fewer lines)

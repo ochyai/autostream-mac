@@ -35,7 +35,7 @@ LATENT_SIZE = RENDER_SIZE // 8
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
-LATENT_FEEDBACK = 0.3
+LATENT_FEEDBACK = 0.0
 COMPUTE_UNITS = ct.ComputeUnit.CPU_AND_GPU
 
 
@@ -212,10 +212,6 @@ class InferencePipeline:
         rng = np.random.RandomState(42)
         self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float16)
         self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float16)
-        self._prev_denoised = np.zeros((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
-        self._has_prev = False
-        self._fb = np.float16(LATENT_FEEDBACK)
-        self._fb_inv = np.float16(1.0 - LATENT_FEEDBACK)
 
         # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
         self._enc_input = {"image": self._img_buf}
@@ -272,10 +268,6 @@ class InferencePipeline:
         enc = self.vae_encoder.predict(self._enc_input)
         clean = np.asarray(enc["latent"], dtype=np.float16)
 
-        # Latent feedback from previous frame
-        if self._has_prev and LATENT_FEEDBACK > 0:
-            clean = self._fb_inv * clean + self._fb * self._prev_denoised
-
         # Compute noisy directly into _lat_buf (no temp allocation)
         np.multiply(self._sqrt_a, clean, out=self._lat_buf)
         np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
@@ -288,8 +280,6 @@ class InferencePipeline:
         np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
         np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
-        np.copyto(self._prev_denoised, self._out_buf)
-        self._has_prev = True
 
         # VAE Decode — compute in CHW (contiguous) to avoid strided read overhead
         dec = self.vae_decoder.predict(self._dec_input)
