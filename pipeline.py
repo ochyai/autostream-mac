@@ -151,7 +151,6 @@ class InferencePipeline:
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
         # Pre-allocated buffers
-        self._out_buf = np.empty((1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.float32)  # 64x64 denoised latent
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_64 = np.empty((3, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.uint8)     # 64x64 CHW for postprocess
         self._bgr_64 = np.empty((UNET_LATENT_SIZE, UNET_LATENT_SIZE, 3), dtype=np.uint8)       # 64x64 HWC BGR
@@ -238,18 +237,12 @@ class InferencePipeline:
         Returns:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
-        # UNet inference at 64x64 (encoder skipped: noise_term = fixed UNet input)
+        # UNet inference at 64x64 (encoder+decoder skipped)
         u = self.unet.predict(self._unet_input)
         npred = np.asarray(u["noise_pred"])  # (1, 4, 64, 64) float32
 
-        # Denoise at 64x64: inv_sqrt_a * noise_term + (-K) * npred in one C call
-        cv2.addWeighted(self._noise_term.reshape(4, 64, 64), float(self._inv_sqrt_a),
-                        npred.reshape(4, 64, 64), float(self._neg_K), 0.0,
-                        dst=self._out_buf.reshape(4, 64, 64))
-
-        # Postprocess: skip decoder, use first 3 latent channels as image colors
-        # out_buf[0, :3] is (3, 64, 64) float32 CHW
-        cv2.convertScaleAbs(self._out_buf[0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
+        # Postprocess: use npred directly (skip denoise, use first 3 channels as colors)
+        cv2.convertScaleAbs(npred[0, :3], dst=self._uint8_64, alpha=127.5, beta=127.5)
         np.copyto(self._bgr_64, self._uint8_64[::-1].transpose(1, 2, 0))
         cv2.resize(self._bgr_64, (OUTPUT_SIZE, OUTPUT_SIZE), dst=self._output_buf)
         return self._output_buf
