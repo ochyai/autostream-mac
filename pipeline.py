@@ -30,8 +30,9 @@ COREML_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "coreml_mo
 
 # ── Configuration ────────────────────────────────────────────
 RENDER_SIZE = 512
-OUTPUT_SIZE = 64
-LATENT_SIZE = RENDER_SIZE // 8
+OUTPUT_SIZE = 256
+LATENT_SIZE = 32   # 32x32 UNet latent (unet_sdxs_512_32)
+ENC_LATENT = RENDER_SIZE // 8  # 64 — actual VAE encoder output size
 MODEL_NAME = "sdxs"
 PROMPT = "oil painting style, masterpiece, highly detailed"
 STRENGTH = 0.5
@@ -141,7 +142,7 @@ class InferencePipeline:
         enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
         dec_path = _ensure_vae_decoder(OUTPUT_SIZE, COREML_DIR)
         prefix = cfg["unet_prefix"]
-        unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
+        unet_path = os.path.join(COREML_DIR, f"{prefix}_{LATENT_SIZE}.mlpackage")
         if not os.path.exists(unet_path):
             raise FileNotFoundError(
                 f"UNet not found: {unet_path}\n"
@@ -156,7 +157,6 @@ class InferencePipeline:
         self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
-        self._dec32_buf = np.empty((1, 4, OUTPUT_SIZE // 8, OUTPUT_SIZE // 8), dtype=np.float32)
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
 
@@ -218,7 +218,7 @@ class InferencePipeline:
             "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         }
-        self._dec_input = {"latent": self._dec32_buf}
+        self._dec_input = {"latent": self._out_buf}
 
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
@@ -245,12 +245,12 @@ class InferencePipeline:
             frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
             (127.5, 127.5, 127.5), swapRB=True, crop=True))
 
-        # VAE Encode
+        # VAE Encode (512x512 → 64x64 latent)
         enc = self.vae_encoder.predict(self._enc_input)
-        clean = np.asarray(enc["latent"])  # float32 natively, no conversion
+        clean64 = np.asarray(enc["latent"])  # (1,4,64,64) float32 view
 
-        # Compute noisy directly into _lat_buf (no temp allocation)
-        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
+        # Stride-2 subsample 64x64 → 32x32 for 32x32 UNet, add noise
+        np.multiply(self._sqrt_a, clean64[:, :, ::2, ::2], out=self._lat_buf)
         np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
 
         # UNet inference
@@ -262,10 +262,7 @@ class InferencePipeline:
         np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
         np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
 
-        # Stride-8 subsample 64x64 latent → 8x8 for 64x64 VAE decoder
-        np.copyto(self._dec32_buf, self._out_buf[:, :, ::8, ::8])
-
-        # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
+        # VAE Decode — _out_buf (32x32) feeds 256x256 decoder directly
         dec = self.vae_decoder.predict(self._dec_input)
         chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view, no copy
         cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
