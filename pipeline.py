@@ -190,6 +190,7 @@ class InferencePipeline:
 
         self._sqrt_a = np.float16(np.sqrt(ap))
         self._sqrt_1ma = np.float16(np.sqrt(1.0 - ap))
+        self._inv_sqrt_a = np.float16(1.0 / float(self._sqrt_a))
 
         # Encode prompt
         with torch.no_grad():
@@ -209,7 +210,11 @@ class InferencePipeline:
         # Fixed noise for temporal coherence
         rng = np.random.RandomState(42)
         self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float16)
-        self._prev_denoised = None
+        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float16)
+        self._prev_denoised = np.zeros((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
+        self._has_prev = False
+        self._fb = np.float16(LATENT_FEEDBACK)
+        self._fb_inv = np.float16(1.0 - LATENT_FEEDBACK)
 
         # Internal warmup (CoreML compilation)
         print("  CoreML warmup...")
@@ -258,13 +263,12 @@ class InferencePipeline:
         clean = np.asarray(enc["latent"], dtype=np.float16)
 
         # Latent feedback from previous frame
-        if self._prev_denoised is not None and LATENT_FEEDBACK > 0:
-            fb = np.float16(LATENT_FEEDBACK)
-            clean = (1.0 - fb) * clean + fb * self._prev_denoised
+        if self._has_prev and LATENT_FEEDBACK > 0:
+            clean = self._fb_inv * clean + self._fb * self._prev_denoised
 
-        # Add fixed noise
-        noisy = self._sqrt_a * clean + self._sqrt_1ma * self._fixed_noise
-        np.copyto(self._lat_buf, noisy)
+        # Compute noisy directly into _lat_buf (no temp allocation)
+        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
+        np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
 
         # UNet inference
         u = self.unet.predict({
@@ -272,10 +276,13 @@ class InferencePipeline:
             "encoder_hidden_states": self._prompt_embeds,
         })
         npred = np.asarray(u["noise_pred"], dtype=np.float16)
-        denoised = (noisy - self._sqrt_1ma * npred) / self._sqrt_a
 
-        self._prev_denoised = denoised.copy()
-        np.copyto(self._out_buf, denoised)
+        # Compute denoised directly into _out_buf (no temp allocations)
+        np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
+        np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
+        np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
+        np.copyto(self._prev_denoised, self._out_buf)
+        self._has_prev = True
 
         # VAE Decode
         dec = self.vae_decoder.predict({"latent": self._out_buf})
