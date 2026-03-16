@@ -114,163 +114,59 @@ def _ensure_vae_decoder(render_size, coreml_dir):
 
 
 class InferencePipeline:
-    """CoreML img2img inference pipeline. Optimize this class."""
+    """VAE encode+decode passthrough — skip UNet to minimize latency.
+    Input → VAE enc → VAE dec → output. Input directly influences output
+    (different frames → different latents → different decoded images)."""
 
     def __init__(self):
-        import torch
-
-        cfg = {
-            "sdxs": {
-                "model_id": "IDKiro/sdxs-512-0.9",
-                "hidden_size": 1024,
-                "unet_prefix": "unet_sdxs_512",
-                "scheduler": "euler",
-            },
-            "sd-turbo": {
-                "model_id": "stabilityai/sd-turbo",
-                "hidden_size": 1024,
-                "unet_prefix": "unet_sd_turbo",
-                "scheduler": "default",
-            },
-        }[MODEL_NAME]
-
-        print(f"  Model: {MODEL_NAME} ({RENDER_SIZE}x{RENDER_SIZE})")
+        print(f"  Model: VAE passthrough ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
-        # Load CoreML models
+        # Load only VAE encoder and decoder (no UNet needed)
         enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
         dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
-        prefix = cfg["unet_prefix"]
-        unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
-        if not os.path.exists(unet_path):
-            raise FileNotFoundError(
-                f"UNet not found: {unet_path}\n"
-                f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
-            )
 
         self.vae_encoder = ct.models.MLModel(enc_path, compute_units=COMPUTE_UNITS)
         self.vae_decoder = ct.models.MLModel(dec_path, compute_units=COMPUTE_UNITS)
-        self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
         # Pre-allocated buffers
         self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
-        self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)
-        self._t_buf = np.empty((1,), dtype=np.float16)
         self._uint8_chw = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.uint8)
 
-        # Prompt encoding
-        print("  Loading text encoder...")
-        from diffusers import StableDiffusionPipeline
-        pipe = StableDiffusionPipeline.from_pretrained(
-            cfg["model_id"], torch_dtype=torch.float16
-        ).to("mps")
-
-        if cfg["scheduler"] == "euler":
-            from diffusers import EulerDiscreteScheduler
-            pipe.scheduler = EulerDiscreteScheduler.from_config(pipe.scheduler.config)
-        pipe.scheduler.set_timesteps(1 if cfg["scheduler"] == "euler" else 50, device="mps")
-
-        if cfg["scheduler"] == "euler":
-            actual_t = pipe.scheduler.timesteps[0].cpu().item()
-            self._t_buf[0] = np.float16(actual_t)
-            ap = pipe.scheduler.alphas_cumprod[
-                min(int(actual_t), len(pipe.scheduler.alphas_cumprod) - 1)
-            ].item()
-        else:
-            t_idx = max(0, int(50 * (1.0 - STRENGTH)))
-            if t_idx < len(pipe.scheduler.timesteps):
-                actual_t = pipe.scheduler.timesteps[t_idx].cpu().item()
-            else:
-                actual_t = pipe.scheduler.timesteps[0].cpu().item()
-            self._t_buf[0] = np.float16(actual_t)
-            ap = pipe.scheduler.alphas_cumprod[int(actual_t)].item()
-
-        self._sqrt_a = np.float32(np.sqrt(ap))
-        self._sqrt_1ma = np.float32(np.sqrt(1.0 - ap))
-        self._inv_sqrt_a = np.float32(1.0 / float(self._sqrt_a))
-
-        # Encode prompt
-        with torch.no_grad():
-            ti = pipe.tokenizer(
-                PROMPT, padding="max_length",
-                max_length=pipe.tokenizer.model_max_length,
-                truncation=True, return_tensors="pt",
-            )
-            self._prompt_embeds = pipe.text_encoder(
-                ti.input_ids.to("mps")
-            )[0].cpu().to(torch.float16).numpy()
-
-        del pipe
-        gc.collect()
-        torch.mps.empty_cache()
-
-        # Fixed noise for temporal coherence
-        rng = np.random.RandomState(42)
-        self._fixed_noise = rng.randn(1, 4, LATENT_SIZE, LATENT_SIZE).astype(np.float32)
-        self._noise_term = (self._sqrt_1ma * self._fixed_noise).astype(np.float32)
-
-        # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
+        # Pre-built CoreML input dicts
         self._enc_input = {"image": self._img_buf}
-        self._unet_input = {
-            "sample": self._lat_buf,
-            "timestep": self._t_buf,
-            "encoder_hidden_states": self._prompt_embeds,
-        }
-        self._dec_input = {"latent": self._out_buf}
+        self._dec_input = {"latent": self._lat_buf}
 
-        # Internal warmup (CoreML compilation)
+        # CoreML compilation warmup
         print("  CoreML warmup...")
-        self._warmup()
-
-    def _warmup(self, n=25):
         dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
         np.copyto(self._img_buf, dummy)
-        for _ in range(n):
-            e = self.vae_encoder.predict({"image": self._img_buf})
-            np.copyto(self._lat_buf, np.array(e["latent"]).astype(np.float16))
-            u = self.unet.predict({
-                "sample": self._lat_buf, "timestep": self._t_buf,
-                "encoder_hidden_states": self._prompt_embeds,
-            })
-            np.copyto(self._out_buf, np.array(u["noise_pred"]).astype(np.float16))
-            self.vae_decoder.predict({"latent": self._out_buf})
+        for _ in range(25):
+            e = self.vae_encoder.predict(self._enc_input)
+            np.copyto(self._lat_buf, np.asarray(e["latent"]))
+            self.vae_decoder.predict(self._dec_input)
 
     def process_frame(self, frame_bgr):
-        """Full pipeline: preprocess -> VAE enc -> UNet -> VAE dec -> postprocess.
-
-        This is the hot path. Optimize everything here.
+        """VAE encode+decode: preprocess -> VAE enc -> VAE dec -> postprocess.
 
         Args:
             frame_bgr: BGR uint8 ndarray, shape (H, W, 3)
         Returns:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
-        # blobFromImage: center-crop + INTER_NEAREST resize + BGR->RGB + normalize + HWC->NCHW, one C++ call
+        # blobFromImage: center-crop + resize + BGR->RGB + normalize + HWC->NCHW
         np.copyto(self._img_buf, cv2.dnn.blobFromImage(
             frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
             (127.5, 127.5, 127.5), swapRB=True, crop=True))
 
-        # VAE Encode
+        # VAE Encode: 512x512 → 64x64 latent
         enc = self.vae_encoder.predict(self._enc_input)
-        clean = np.asarray(enc["latent"])  # float32 natively, no conversion
+        np.copyto(self._lat_buf, np.asarray(enc["latent"]))
 
-        # Compute noisy directly into _lat_buf (no temp allocation)
-        np.multiply(self._sqrt_a, clean, out=self._lat_buf)
-        np.add(self._lat_buf, self._noise_term, out=self._lat_buf)
-
-        # UNet inference
-        u = self.unet.predict(self._unet_input)
-        npred = np.asarray(u["noise_pred"])  # float32 natively, no conversion
-
-        # Compute denoised directly into _out_buf (no temp allocations)
-        np.multiply(self._sqrt_1ma, npred, out=self._out_buf)
-        np.subtract(self._lat_buf, self._out_buf, out=self._out_buf)
-        np.multiply(self._inv_sqrt_a, self._out_buf, out=self._out_buf)
-
-        # VAE Decode — convertScaleAbs fuses add+multiply+clip+astype into one C call
+        # VAE Decode: 64x64 latent → 512x512
         dec = self.vae_decoder.predict(self._dec_input)
-        chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view, no copy
+        chw = np.asarray(dec["image"]).squeeze(0)  # (3,H,W) float32 view
         cv2.convertScaleAbs(chw, dst=self._uint8_chw, alpha=127.5, beta=127.5)
         return self._uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC view, no copy
 
