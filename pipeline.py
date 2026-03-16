@@ -254,7 +254,7 @@ class InferencePipeline:
             frame_bgr = frame_bgr[off:off + w, :]
 
         # Resize + normalize
-        resized = cv2.resize(frame_bgr, (RENDER_SIZE, RENDER_SIZE))
+        resized = cv2.resize(frame_bgr, (RENDER_SIZE, RENDER_SIZE), interpolation=cv2.INTER_NEAREST)
         rgb = resized[:, :, ::-1]
         np.copyto(self._img_buf, self._norm_lut[rgb].transpose(2, 0, 1)[np.newaxis])
 
