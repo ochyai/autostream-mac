@@ -158,6 +158,7 @@ class InferencePipeline:
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
         self._t_buf = np.empty((1,), dtype=np.float16)
         self._chw_f32 = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
+        self._resized_buf = np.empty((RENDER_SIZE, RENDER_SIZE, 3), dtype=np.uint8)
 
         # Normalization LUT: pixel [0,255] -> [-1, 1] in float16
         self._norm_lut = (np.arange(256, dtype=np.float32) / 127.5 - 1.0).astype(np.float16)
@@ -259,9 +260,9 @@ class InferencePipeline:
             off = (h - w) // 2
             frame_bgr = frame_bgr[off:off + w, :]
 
-        # Resize + normalize
-        resized = cv2.resize(frame_bgr, (RENDER_SIZE, RENDER_SIZE), interpolation=cv2.INTER_NEAREST)
-        rgb = resized[:, :, ::-1]
+        # Resize + normalize (pre-alloc resize buffer to avoid per-frame uint8 alloc)
+        cv2.resize(frame_bgr, (RENDER_SIZE, RENDER_SIZE), dst=self._resized_buf, interpolation=cv2.INTER_NEAREST)
+        rgb = self._resized_buf[:, :, ::-1]
         np.copyto(self._img_buf, self._norm_lut[rgb].transpose(2, 0, 1)[np.newaxis])
 
         # VAE Encode

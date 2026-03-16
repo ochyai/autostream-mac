@@ -14,3 +14,5 @@ e5f3e2b	42.607	23.47	1889	discard	float16 view for VAE decode + mixed np.add (fl
 aef18c3	37.476	26.68	1890	discard	np.take per channel into CHW (3 calls overhead outweighs 1 fancy-index + copyto)
 15d6326	40.039	24.98	1890	discard	np.copyto float16->float32 widening (asarray dtype=float32 is faster)
 071b527	37.291	26.91	1890	keep	LATENT_FEEDBACK=0, remove all feedback code (simpler pipeline, 11 fewer lines)
+ba17589	46.617	21.45	1886	discard	ComputeUnit.ALL for VAE enc/dec (ANE overhead makes small models slower)
+29c47b4	37.170	26.89	1891	keep	pre-alloc resize buffer, cv2.resize dst= (avoid 786KB uint8 alloc per frame)
