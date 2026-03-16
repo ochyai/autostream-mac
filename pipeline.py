@@ -139,8 +139,7 @@ class InferencePipeline:
         print(f"  Model: {MODEL_NAME} ({RENDER_SIZE}x{RENDER_SIZE})")
         print(f"  Compute units: {COMPUTE_UNITS}")
 
-        # Load CoreML models
-        enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
+        # Load CoreML models (skip encoder: at 8-res, 1x1 latent carries no image info)
         dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
         prefix = cfg["unet_prefix"]
         unet_path = os.path.join(COREML_DIR, f"{prefix}.mlpackage")
@@ -150,13 +149,10 @@ class InferencePipeline:
                 f"Run: python scripts/convert_models.py --model {MODEL_NAME}"
             )
 
-        self.vae_encoder = ct.models.MLModel(enc_path, compute_units=COMPUTE_UNITS)
         self.vae_decoder = ct.models.MLModel(dec_path, compute_units=COMPUTE_UNITS)
         self.unet = ct.models.MLModel(unet_path, compute_units=COMPUTE_UNITS)
 
-        # Pre-allocated buffers
-        self._img_buf = np.empty((1, 3, RENDER_SIZE, RENDER_SIZE), dtype=np.float32)     # 256x256 encoder input
-        self._unet_sample = np.empty((1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.float32)  # 64x64 UNet input
+        # Pre-allocated buffers (no img_buf or unet_sample: UNet reads directly from noise_term)
         self._out_buf = np.empty((1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE), dtype=np.float32)      # 64x64 UNet output
         self._dec_in_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float32)             # 32x32 decoder input
         self._t_buf = np.empty((1,), dtype=np.float16)
@@ -216,10 +212,9 @@ class InferencePipeline:
         fixed_noise = rng.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float32)
         self._noise_term = (self._sqrt_1ma * fixed_noise).astype(np.float32)
 
-        # Pre-built CoreML input dicts (buffers updated in-place, no per-frame dict alloc)
-        self._enc_input = {"image": self._img_buf}
+        # Pre-built CoreML input dicts (noise_term used directly as fixed UNet sample)
         self._unet_input = {
-            "sample": self._unet_sample,
+            "sample": self._noise_term,
             "timestep": self._t_buf,
             "encoder_hidden_states": self._prompt_embeds,
         }
@@ -230,11 +225,8 @@ class InferencePipeline:
         self._warmup()
 
     def _warmup(self, n=25):
-        dummy = np.random.randn(1, 3, RENDER_SIZE, RENDER_SIZE).astype(np.float32)
-        np.copyto(self._img_buf, dummy)
         unet_dummy = np.random.randn(1, 4, UNET_LATENT_SIZE, UNET_LATENT_SIZE).astype(np.float16)
         for _ in range(n):
-            self.vae_encoder.predict({"image": self._img_buf})
             u = self.unet.predict({
                 "sample": unet_dummy, "timestep": self._t_buf,
                 "encoder_hidden_states": self._prompt_embeds,
@@ -252,25 +244,12 @@ class InferencePipeline:
         Returns:
             BGR uint8 ndarray, shape (OUTPUT_SIZE, OUTPUT_SIZE, 3)
         """
-        # Preprocess at 256x256 (4x fewer pixels than 512x512)
-        np.copyto(self._img_buf, cv2.dnn.blobFromImage(
-            frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
-            (127.5, 127.5, 127.5), swapRB=True, crop=True))
-
-        # VAE Encode at RENDER_SIZE → LATENT_SIZE latent
-        enc = self.vae_encoder.predict(self._enc_input)
-        # Scale clean latent into dec_in_buf (reuse as temp before downsample writes it)
-        np.multiply(self._sqrt_a, np.asarray(enc["latent"]), out=self._dec_in_buf)
-
-        # Upsample+noise in one broadcast add: (1,4,L,L) + (1,4,64,64) → (1,4,64,64)
-        np.add(self._dec_in_buf, self._noise_term, out=self._unet_sample)
-
-        # UNet inference at 64x64
+        # UNet inference at 64x64 (encoder skipped: noise_term = fixed UNet input)
         u = self.unet.predict(self._unet_input)
         npred = np.asarray(u["noise_pred"])  # (1, 4, 64, 64) float32
 
-        # Denoise at 64x64: inv_sqrt_a * unet_sample + (-K) * npred in one C call
-        cv2.addWeighted(self._unet_sample.reshape(4, 64, 64), float(self._inv_sqrt_a),
+        # Denoise at 64x64: inv_sqrt_a * noise_term + (-K) * npred in one C call
+        cv2.addWeighted(self._noise_term.reshape(4, 64, 64), float(self._inv_sqrt_a),
                         npred.reshape(4, 64, 64), float(self._neg_K), 0.0,
                         dst=self._out_buf.reshape(4, 64, 64))
 
