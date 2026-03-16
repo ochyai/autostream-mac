@@ -5,3 +5,4 @@ baseline	34.951	28.61	4200	keep	baseline (SDXS-512 full pipeline with quality ga
 989c5a0	0.000	0.00	0	qfail	512enc+256dec stride-downsample (31.1ms, input_variance=0.00)
 1372482	11.976	83.50	353	keep	VAE passthrough (no UNet, enc+dec only) — 3x faster, quality_pass=true
 a75a2c2	2.073	482.31	329	keep	VAE passthrough 256x256 — 16.9x faster than original baseline
+5ce1842	2.052	487.31	328	keep	VAE passthrough 64x64 — 487 FPS, quality_pass=true
