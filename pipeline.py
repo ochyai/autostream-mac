@@ -157,6 +157,7 @@ class InferencePipeline:
         self._lat_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
         self._out_buf = np.empty((1, 4, LATENT_SIZE, LATENT_SIZE), dtype=np.float16)
         self._t_buf = np.empty((1,), dtype=np.float16)
+        self._chw_f32 = np.empty((3, OUTPUT_SIZE, OUTPUT_SIZE), dtype=np.float32)
 
         # Normalization LUT: pixel [0,255] -> [-1, 1] in float16
         self._norm_lut = (np.arange(256, dtype=np.float32) / 127.5 - 1.0).astype(np.float16)
@@ -290,15 +291,14 @@ class InferencePipeline:
         np.copyto(self._prev_denoised, self._out_buf)
         self._has_prev = True
 
-        # VAE Decode
+        # VAE Decode — compute in CHW (contiguous) to avoid strided read overhead
         dec = self.vae_decoder.predict(self._dec_input)
-        r = np.asarray(dec["image"], dtype=np.float32).squeeze(0).transpose(1, 2, 0)
-        r = ((r + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
-
-        if r.shape[0] != OUTPUT_SIZE:
-            r = cv2.resize(r, (OUTPUT_SIZE, OUTPUT_SIZE))
-
-        return cv2.cvtColor(r, cv2.COLOR_RGB2BGR)
+        chw = np.asarray(dec["image"], dtype=np.float32).squeeze(0)  # (3,H,W) contiguous
+        np.add(chw, 1.0, out=self._chw_f32)
+        np.multiply(self._chw_f32, 127.5, out=self._chw_f32)
+        np.clip(self._chw_f32, 0.0, 255.0, out=self._chw_f32)
+        uint8_chw = self._chw_f32.astype(np.uint8)  # (3,H,W) uint8
+        return uint8_chw[::-1].transpose(1, 2, 0)  # BGR HWC (non-contiguous view, no copy)
 
 
 def create_pipeline():

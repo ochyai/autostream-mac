@@ -8,3 +8,4 @@ fc32cee	38.988	25.65	1887	keep	use INTER_NEAREST for resize (faster for diffusio
 f93488f	39.334	25.42	1887	discard	cv2.dnn.blobFromImage preprocessing (INTER_LINEAR + float32->float16 copy overhead)
 19bf8d3	38.986	25.65	1886	discard	in-place feedback blend into _lat_buf (5 numpy calls outweigh 3 alloc savings)
 42a58f5	37.560	26.62	1885	keep	pre-build CoreML input dicts in init (avoid per-frame dict alloc + coremltools overhead)
+3de38a1	37.335	26.78	1887	keep	CHW post-processing with pre-alloc buffer, return BGR view (skip cvtColor, avoid 3 float32 allocs)
