@@ -256,16 +256,13 @@ class InferencePipeline:
             frame_bgr, 1.0 / 127.5, (RENDER_SIZE, RENDER_SIZE),
             (127.5, 127.5, 127.5), swapRB=True, crop=True))
 
-        # VAE Encode at 256x256 → 32x32 latent (~4x faster than 512 encoder)
+        # VAE Encode at RENDER_SIZE → LATENT_SIZE latent
         enc = self.vae_encoder.predict(self._enc_input)
-        clean = np.asarray(enc["latent"])  # (1, 4, LATENT_SIZE, LATENT_SIZE) float32
+        # Scale clean latent into dec_in_buf (reuse as temp before downsample writes it)
+        np.multiply(self._sqrt_a, np.asarray(enc["latent"]), out=self._dec_in_buf)
 
-        # Upsample LATENT_SIZE → 64 for UNet
-        np.copyto(self._unet_sample, np.repeat(np.repeat(clean, UPSAMPLE_FACTOR, axis=2), UPSAMPLE_FACTOR, axis=3))
-
-        # Add noise at 64x64 scale
-        np.multiply(self._sqrt_a, self._unet_sample, out=self._unet_sample)
-        np.add(self._unet_sample, self._noise_term, out=self._unet_sample)
+        # Upsample+noise in one broadcast add: (1,4,L,L) + (1,4,64,64) → (1,4,64,64)
+        np.add(self._dec_in_buf, self._noise_term, out=self._unet_sample)
 
         # UNet inference at 64x64
         u = self.unet.predict(self._unet_input)

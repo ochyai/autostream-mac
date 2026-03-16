@@ -51,3 +51,6 @@ dbf991e	28.285	35.36	1907	keep	256-res VAE enc/dec: latent upsample 32→64 for 
 a5b5428	24.961	40.07	1902	keep	32-res VAE enc/dec with 16x latent upsample (avg 2 runs, 0.905ms faster than 64-res)
 87858dc	24.375	41.03	1899	keep	16-res VAE enc/dec with 32x latent upsample (avg 2 runs, 0.586ms faster)
 1877969	24.099	41.49	1900	keep	8-res VAE enc/dec with 64x latent upsample (1x1 latent, avg 2 runs, 0.276ms faster)
+43ee8a0	24.212	41.31	1881	discard	broadcast_to + fused multiply instead of repeat+repeat+copyto (non-contiguous strides slower)
+56feb11	24.112	41.47	1884	discard	INTER_NEAREST for 8->512 output resize (avg 2 runs, 0.013ms noise)
+ede7c95	24.088	41.52	1884	keep	broadcast add fuses upsample+noise: scale clean into (L,L) buf, add to (64,64) noise (avg 2 runs, simpler + 0.011ms)
