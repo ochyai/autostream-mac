@@ -46,3 +46,4 @@ cce2092	9.171	109.04	1993	keep	RENDER_SIZE=32 native enc (4x4 latent) + 4x4 UNet
 c93712f	9.208	108.60	1993	discard	ComputeUnit.ALL for 4x4 UNet — no improvement vs CPU_AND_GPU
 f477631	11.631	85.97	1991	discard	CPU_ONLY for 4x4 UNet — slower (GPU wins even for tiny models)
 27b6cba	9.180	108.93	1993	discard	FastPrediction+Infrequent optimization hints — no improvement vs baseline
+a1f3b82	22.201	45.04	1519	keep	slim_30 UNet [96,192,384] — 22ms/45FPS, 37% faster than 35ms baseline
