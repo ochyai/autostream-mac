@@ -141,7 +141,7 @@ class InferencePipeline:
         enc_path = os.path.join(COREML_DIR, "taesd_encoder_512_fp16c.mlpackage")
         dec_path = os.path.join(COREML_DIR, "taesd_decoder_fp16c.mlpackage")
         prefix = cfg["unet_prefix"]
-        unet_path = os.path.join(COREML_DIR, f"{prefix}_slim_15.mlpackage")
+        unet_path = os.path.join(COREML_DIR, f"{prefix}_slim_10.mlpackage")
         if not os.path.exists(unet_path):
             raise FileNotFoundError(
                 f"UNet not found: {unet_path}\n"
