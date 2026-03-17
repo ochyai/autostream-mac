@@ -1,0 +1,94 @@
+[
+  {
+    "test": "compute_units",
+    "config": "CPU_AND_GPU",
+    "enc_ms": 6.118259429931641,
+    "dec_ms": 6.772680282592773,
+    "total_ms": 12.890939712524414
+  },
+  {
+    "test": "compute_units",
+    "config": "ALL",
+    "enc_ms": 8.868980407714844,
+    "dec_ms": 11.378297805786133,
+    "total_ms": 20.247278213500977
+  },
+  {
+    "test": "compute_units",
+    "config": "CPU_ONLY",
+    "enc_ms": 56.22453689575195,
+    "dec_ms": 71.8391227722168,
+    "total_ms": 128.06365966796875
+  },
+  {
+    "test": "compute_units",
+    "config": "CPU_AND_NE",
+    "enc_ms": 8.350720405578613,
+    "dec_ms": 8.653984069824219,
+    "total_ms": 17.004704475402832
+  },
+  {
+    "test": "lower_res_encode",
+    "config": "256x256",
+    "preprocess_ms": 0.20357608795166016,
+    "enc_ms": 2.37246036529541,
+    "upsample_ms": 0.01647472381591797,
+    "dec_ms": 6.943659782409668,
+    "total_ms": 9.536170959472656
+  },
+  {
+    "test": "lower_res_encode",
+    "config": "384x384",
+    "preprocess_ms": 0.2464008331298828,
+    "enc_ms": 3.831963539123535,
+    "upsample_ms": 0.018820762634277344,
+    "dec_ms": 6.980719566345215,
+    "total_ms": 11.07790470123291
+  },
+  {
+    "test": "mixed_compute_units",
+    "config": "enc:CPU_AND_NE dec:CPU_AND_GPU",
+    "enc_ms": 8.352499008178711,
+    "dec_ms": 6.975460052490234,
+    "total_ms": 15.327959060668945
+  },
+  {
+    "test": "mixed_compute_units",
+    "config": "enc:CPU_AND_GPU dec:CPU_AND_NE",
+    "enc_ms": 6.158018112182617,
+    "dec_ms": 8.634681701660156,
+    "total_ms": 14.792699813842773
+  },
+  {
+    "test": "mixed_compute_units",
+    "config": "enc:ALL dec:CPU_AND_GPU",
+    "enc_ms": 9.261102676391602,
+    "dec_ms": 6.61165714263916,
+    "total_ms": 15.872759819030762
+  },
+  {
+    "test": "mixed_compute_units",
+    "config": "enc:CPU_AND_GPU dec:ALL",
+    "enc_ms": 5.775017738342285,
+    "dec_ms": 11.393098831176758,
+    "total_ms": 17.168116569519043
+  },
+  {
+    "test": "lower_res_decode",
+    "config": "decode_256",
+    "enc_ms": 6.079916954040527,
+    "downsample_ms": 0.007205009460449219,
+    "dec_ms": 2.1879196166992188,
+    "upscale_ms": 0.2655363082885742,
+    "total_ms": 8.54057788848877
+  },
+  {
+    "test": "lower_res_decode",
+    "config": "decode_384",
+    "enc_ms": 5.765581130981445,
+    "downsample_ms": 0.013661384582519531,
+    "dec_ms": 4.291877746582031,
+    "upscale_ms": 0.5307435989379883,
+    "total_ms": 10.601863861083984
+  }
+]

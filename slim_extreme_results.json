@@ -1,0 +1,134 @@
+[
+  {
+    "name": "slim_40",
+    "channels": [
+      128,
+      256,
+      512
+    ],
+    "params": 56338692,
+    "param_reduction": 0.8283284835765781,
+    "final_loss": 0.0008822978497482837,
+    "model_size_mb": 107.83790397644043,
+    "avg_ms": 18.246,
+    "fps": 54.81,
+    "memory_mb": 1552.8,
+    "quality_pass": true,
+    "unique_colors": 178671.0,
+    "input_variance": 3.53,
+    "spatial_stddev": 41.8,
+    "transform_diff": 60.73,
+    "edge_strength": 71.45,
+    "status": "success"
+  },
+  {
+    "name": "slim_20",
+    "channels": [
+      64,
+      128,
+      256
+    ],
+    "params": 15680644,
+    "param_reduction": 0.9522189841756384,
+    "final_loss": 0.0008798167505301535,
+    "model_size_mb": 30.293972969055176,
+    "avg_ms": 18.809,
+    "fps": 53.16,
+    "memory_mb": 1519.5,
+    "quality_pass": true,
+    "unique_colors": 178671.0,
+    "input_variance": 3.53,
+    "spatial_stddev": 41.8,
+    "transform_diff": 60.73,
+    "edge_strength": 71.45,
+    "status": "success"
+  },
+  {
+    "name": "slim_15",
+    "channels": [
+      64,
+      96,
+      192
+    ],
+    "params": 10008164,
+    "param_reduction": 0.9695037880805912,
+    "final_loss": 0.0006997106084600091,
+    "model_size_mb": 19.485754013061523,
+    "avg_ms": 18.212,
+    "fps": 54.91,
+    "memory_mb": 1517.0,
+    "quality_pass": true,
+    "unique_colors": 178671.0,
+    "input_variance": 3.53,
+    "spatial_stddev": 41.8,
+    "transform_diff": 60.73,
+    "edge_strength": 71.45,
+    "status": "success"
+  },
+  {
+    "name": "slim_10",
+    "channels": [
+      32,
+      64,
+      128
+    ],
+    "params": 4718148,
+    "param_reduction": 0.9856231731139563,
+    "final_loss": 0.0008690134028438479,
+    "model_size_mb": 9.39082145690918,
+    "avg_ms": 16.336,
+    "fps": 61.21,
+    "memory_mb": 1490.6,
+    "quality_pass": true,
+    "unique_colors": 171595.0,
+    "input_variance": 2.7,
+    "spatial_stddev": 49.09,
+    "transform_diff": 64.65,
+    "edge_strength": 56.4,
+    "status": "success"
+  },
+  {
+    "name": "slim_asym",
+    "channels": [
+      128,
+      192,
+      256
+    ],
+    "params": 22792132,
+    "param_reduction": 0.9305493307696459,
+    "final_loss": 0.0008119768812321126,
+    "model_size_mb": 43.84828186035156,
+    "avg_ms": 16.328,
+    "fps": 61.25,
+    "memory_mb": 1479.1,
+    "quality_pass": true,
+    "unique_colors": 171595.0,
+    "input_variance": 2.7,
+    "spatial_stddev": 49.09,
+    "transform_diff": 64.65,
+    "edge_strength": 56.4,
+    "status": "success"
+  },
+  {
+    "name": "slim_wide",
+    "channels": [
+      192,
+      256,
+      384
+    ],
+    "params": 44988420,
+    "param_reduction": 0.8629142777597001,
+    "final_loss": 0.0009515007014852017,
+    "model_size_mb": 86.18759727478027,
+    "avg_ms": 16.327,
+    "fps": 61.25,
+    "memory_mb": 1470.8,
+    "quality_pass": true,
+    "unique_colors": 171595.0,
+    "input_variance": 2.7,
+    "spatial_stddev": 49.09,
+    "transform_diff": 64.65,
+    "edge_strength": 56.4,
+    "status": "success"
+  }
+]

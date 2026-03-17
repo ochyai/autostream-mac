@@ -1,0 +1,73 @@
+[19:28:28] ============================================================
+[19:28:28]   VAE Optimization Pipeline
+[19:28:28] ============================================================
+[19:28:28] 
+=== Test 1: Compute Units for VAE ===
+[19:28:28]   Testing CPU_AND_GPU...
+[19:28:29]     Encode: 6.12ms, Decode: 6.77ms, Total: 12.89ms
+[19:28:29]   Testing ALL...
+[19:28:31]     Encode: 8.87ms, Decode: 11.38ms, Total: 20.25ms
+[19:28:31]   Testing CPU_ONLY...
+[19:28:39]     Encode: 56.22ms, Decode: 71.84ms, Total: 128.06ms
+[19:28:39]   Testing CPU_AND_NE...
+[19:28:41]     Encode: 8.35ms, Decode: 8.65ms, Total: 17.00ms
+[19:28:41] 
+=== Test 2: Lower-Res Encoding + Latent Upsample ===
+[19:28:41]   Testing encode 256x256 → upsample to 64x64...
+[19:28:42]     preprocess(256): 0.20ms
+[19:28:42]     encode(256): 2.37ms
+[19:28:42]     upsample(32→64): 0.02ms
+[19:28:42]     decode(512): 6.94ms
+[19:28:42]     total: 9.54ms (vs 512 baseline ~13ms)
+[19:28:42]   Testing encode 384x384 → upsample to 64x64...
+[19:28:42]   Converting VAE encoder at 384x384...
+[19:28:45]     preprocess(384): 0.25ms
+[19:28:45]     encode(384): 3.83ms
+[19:28:45]     upsample(48→64): 0.02ms
+[19:28:45]     decode(512): 6.98ms
+[19:28:45]     total: 11.08ms (vs 512 baseline ~13ms)
+[19:28:45] 
+=== Test 3: Mixed Compute Units (enc ≠ dec) ===
+[19:28:45]   Testing enc:CPU_AND_NE dec:CPU_AND_GPU...
+[19:28:47]     Encode: 8.35ms, Decode: 6.98ms, Total: 15.33ms
+[19:28:47]   Testing enc:CPU_AND_GPU dec:CPU_AND_NE...
+[19:28:48]     Encode: 6.16ms, Decode: 8.63ms, Total: 14.79ms
+[19:28:48]   Testing enc:ALL dec:CPU_AND_GPU...
+[19:28:49]     Encode: 9.26ms, Decode: 6.61ms, Total: 15.87ms
+[19:28:49]   Testing enc:CPU_AND_GPU dec:ALL...
+[19:28:51]     Encode: 5.78ms, Decode: 11.39ms, Total: 17.17ms
+[19:28:51] 
+=== Test 4: Lower-Res Decode + cv2 Upscale ===
+[19:28:51]   Testing decode at 256x256 + upscale to 512...
+[19:28:51]     encode(512): 6.08ms
+[19:28:51]     downsample(64→32): 0.01ms
+[19:28:51]     decode(256): 2.19ms
+[19:28:51]     upscale(256→512): 0.27ms
+[19:28:51]     total VAE: 8.54ms
+[19:28:52]   Testing decode at 384x384 + upscale to 512...
+[19:28:52]   Converting VAE decoder at 384x384...
+[19:28:54]     encode(512): 5.77ms
+[19:28:54]     downsample(64→48): 0.01ms
+[19:28:54]     decode(384): 4.29ms
+[19:28:54]     upscale(384→512): 0.53ms
+[19:28:54]     total VAE: 10.60ms
+[19:28:54] 
+============================================================
+[19:28:54]   SUMMARY
+[19:28:54] ============================================================
+[19:28:54]   Baseline (CPU_AND_GPU, 512x512): enc=5.87ms + dec=7.03ms = 12.90ms
+[19:28:54] 
+[19:28:54]   [compute_units] CPU_AND_GPU: total=12.89ms
+[19:28:54]   [compute_units] ALL: total=20.25ms
+[19:28:54]   [compute_units] CPU_ONLY: total=128.06ms
+[19:28:54]   [compute_units] CPU_AND_NE: total=17.00ms
+[19:28:54]   [lower_res_encode] 256x256: total=9.54ms
+[19:28:54]   [lower_res_encode] 384x384: total=11.08ms
+[19:28:54]   [mixed_compute_units] enc:CPU_AND_NE dec:CPU_AND_GPU: total=15.33ms
+[19:28:54]   [mixed_compute_units] enc:CPU_AND_GPU dec:CPU_AND_NE: total=14.79ms
+[19:28:54]   [mixed_compute_units] enc:ALL dec:CPU_AND_GPU: total=15.87ms
+[19:28:54]   [mixed_compute_units] enc:CPU_AND_GPU dec:ALL: total=17.17ms
+[19:28:54]   [lower_res_decode] decode_256: total=8.54ms
+[19:28:54]   [lower_res_decode] decode_384: total=10.60ms
+[19:28:54] 
+Results: /Users/yoichiochiai/autostream-mac/vae_optimize_results.json

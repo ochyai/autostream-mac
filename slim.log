@@ -1,0 +1,91 @@
+[18:51:42] ============================================================
+[18:51:42]   Channel-Slimmed UNet Pipeline
+[18:51:42]   Device: mps
+[18:51:42] ============================================================
+[18:51:42] Loading teacher model...
+[18:51:43]   Teacher: 328,177,284 params
+[18:51:43] Loading text encoder...
+[18:51:44]   Embeddings: torch.Size([1, 77, 1024]), timestep: 999.0
+[18:51:44] 
+============================================================
+[18:51:44]   slim_80: channels=[256, 512, 1024]
+[18:51:44] ============================================================
+[18:51:44]   Creating slim UNet...
+[18:51:44]   Params: 212,587,012 (35.2% reduction)
+[18:51:44]   Initializing from teacher (channel slicing)...
+[18:51:44]   Initialized 358 tensors, skipped 0
+[18:51:46]   Forward pass OK: torch.Size([1, 4, 64, 64])
+[18:51:46]   Fine-tuning 300 steps, lr=0.0002...
+[18:52:12]     Step 100/300: loss=0.059522 (3.9 s/s, ETA 52s)
+[18:52:33]     Step 200/300: loss=0.001891 (4.3 s/s, ETA 23s)
+[18:52:54]     Step 300/300: loss=0.001396 (4.4 s/s, ETA 0s)
+[18:52:54]   Done: loss=0.001316, 67.8s total
+[18:52:54]   Converting slim_80 to CoreML...
+[18:53:07]   Saved: /Users/yoichiochiai/autostream-mac/coreml_models/unet_sdxs_512_slim_80.mlpackage (405.9 MB)
+[18:53:07]   Benchmarking slim_80...
+[18:53:24]   → 28.9ms / 34.6 FPS | quality=PASS
+[18:53:24] 
+============================================================
+[18:53:24]   slim_50: channels=[160, 320, 640]
+[18:53:24] ============================================================
+[18:53:24]   Creating slim UNet...
+[18:53:24]   Params: 86,034,244 (73.8% reduction)
+[18:53:24]   Initializing from teacher (channel slicing)...
+[18:53:24]   Initialized 358 tensors, skipped 0
+[18:53:25]   Forward pass OK: torch.Size([1, 4, 64, 64])
+[18:53:25]   Fine-tuning 800 steps, lr=0.0003...
+[18:53:48]     Step 100/800: loss=0.067728 (4.4 s/s, ETA 160s)
+[18:54:09]     Step 200/800: loss=0.002268 (4.6 s/s, ETA 130s)
+[18:54:29]     Step 300/800: loss=0.001644 (4.7 s/s, ETA 107s)
+[18:54:50]     Step 400/800: loss=0.001407 (4.7 s/s, ETA 85s)
+[18:55:11]     Step 500/800: loss=0.001216 (4.8 s/s, ETA 63s)
+[18:55:31]     Step 600/800: loss=0.001119 (4.8 s/s, ETA 42s)
+[18:55:52]     Step 700/800: loss=0.000996 (4.8 s/s, ETA 21s)
+[18:56:12]     Step 800/800: loss=0.000959 (4.8 s/s, ETA 0s)
+[18:56:12]   Done: loss=0.000941, 167.1s total
+[18:56:13]   Converting slim_50 to CoreML...
+[18:56:22]   Saved: /Users/yoichiochiai/autostream-mac/coreml_models/unet_sdxs_512_slim_50.mlpackage (164.5 MB)
+[18:56:22]   Benchmarking slim_50...
+[18:56:34]   → 21.5ms / 46.6 FPS | quality=PASS
+[18:56:34] 
+============================================================
+[18:56:34]   slim_30: channels=[96, 192, 384]
+[18:56:34] ============================================================
+[18:56:34]   Creating slim UNet...
+[18:56:35]   Params: 32,887,492 (90.0% reduction)
+[18:56:35]   Initializing from teacher (channel slicing)...
+[18:56:35]   Initialized 358 tensors, skipped 0
+[18:56:36]   Forward pass OK: torch.Size([1, 4, 64, 64])
+[18:56:36]   Fine-tuning 1500 steps, lr=0.0005...
+[18:56:59]     Step 100/1500: loss=0.109057 (4.5 s/s, ETA 311s)
+[18:57:19]     Step 200/1500: loss=0.002941 (4.7 s/s, ETA 276s)
+[18:57:39]     Step 300/1500: loss=0.002085 (4.8 s/s, ETA 251s)
+[18:58:00]     Step 400/1500: loss=0.001692 (4.8 s/s, ETA 229s)
+[18:58:20]     Step 500/1500: loss=0.001427 (4.8 s/s, ETA 207s)
+[18:58:40]     Step 600/1500: loss=0.001326 (4.8 s/s, ETA 186s)
+[18:59:00]     Step 700/1500: loss=0.001212 (4.9 s/s, ETA 165s)
+[18:59:21]     Step 800/1500: loss=0.001191 (4.9 s/s, ETA 144s)
+[18:59:41]     Step 900/1500: loss=0.001106 (4.9 s/s, ETA 123s)
+[19:00:01]     Step 1000/1500: loss=0.001004 (4.9 s/s, ETA 102s)
+[19:00:22]     Step 1100/1500: loss=0.000971 (4.9 s/s, ETA 82s)
+[19:00:42]     Step 1200/1500: loss=0.000909 (4.9 s/s, ETA 61s)
+[19:01:02]     Step 1300/1500: loss=0.000889 (4.9 s/s, ETA 41s)
+[19:01:23]     Step 1400/1500: loss=0.000878 (4.9 s/s, ETA 20s)
+[19:01:43]     Step 1500/1500: loss=0.000843 (4.9 s/s, ETA 0s)
+[19:01:43]   Done: loss=0.000848, 306.5s total
+[19:01:43]   Converting slim_30 to CoreML...
+[19:01:50]   Saved: /Users/yoichiochiai/autostream-mac/coreml_models/unet_sdxs_512_slim_30.mlpackage (63.1 MB)
+[19:01:50]   Benchmarking slim_30...
+[19:02:03]   → 18.2ms / 54.8 FPS | quality=PASS
+[19:02:03] 
+============================================================
+[19:02:03]   FINAL RESULTS
+[19:02:03] ============================================================
+[19:02:03]   Name         Channels           Params       Size MB   avg_ms    FPS      Quality
+[19:02:03]   ------------ ------------------ ------------ --------- --------- -------- -------
+[19:02:03]   original     [320,640,1280]     328,177,284    626.0     35.0    28.6    PASS
+[19:02:03]   slim_80      [256, 512, 1024]   212,587,012    405.9     28.9    34.6    PASS
+[19:02:03]   slim_50      [160, 320, 640]     86,034,244    164.5     21.5    46.6    PASS
+[19:02:03]   slim_30      [96, 192, 384]      32,887,492     63.1     18.2    54.8    PASS
+[19:02:03] 
+Done. Results: /Users/yoichiochiai/autostream-mac/slim_results.json
