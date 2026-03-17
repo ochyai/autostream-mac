@@ -7,3 +7,4 @@ run.log
 .DS_Store
 output_samples/
 model_variants_results.tsv
+.env

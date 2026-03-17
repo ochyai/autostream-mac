@@ -1,0 +1,71 @@
+[
+  {
+    "name": "slim_80",
+    "channels": [
+      256,
+      512,
+      1024
+    ],
+    "params": 212587012,
+    "param_reduction": 0.3522189914887589,
+    "init_count": 358,
+    "final_loss": 0.0013160387985408305,
+    "model_size_mb": 405.87005138397217,
+    "avg_ms": 28.885,
+    "fps": 34.62,
+    "memory_mb": 1896.6,
+    "quality_pass": true,
+    "unique_colors": 188238.0,
+    "input_variance": 3.72,
+    "spatial_stddev": 44.66,
+    "transform_diff": 63.88,
+    "edge_strength": 76.79,
+    "status": "success"
+  },
+  {
+    "name": "slim_50",
+    "channels": [
+      160,
+      320,
+      640
+    ],
+    "params": 86034244,
+    "param_reduction": 0.7378421719158356,
+    "init_count": 358,
+    "final_loss": 0.00094144880422391,
+    "model_size_mb": 164.48068046569824,
+    "avg_ms": 21.451,
+    "fps": 46.62,
+    "memory_mb": 1651.1,
+    "quality_pass": true,
+    "unique_colors": 208496.0,
+    "input_variance": 4.61,
+    "spatial_stddev": 83.06,
+    "transform_diff": 84.54,
+    "edge_strength": 131.94,
+    "status": "success"
+  },
+  {
+    "name": "slim_30",
+    "channels": [
+      96,
+      192,
+      384
+    ],
+    "params": 32887492,
+    "param_reduction": 0.8997874209965123,
+    "init_count": 358,
+    "final_loss": 0.0008484624745324254,
+    "model_size_mb": 63.11852264404297,
+    "avg_ms": 18.24,
+    "fps": 54.82,
+    "memory_mb": 1546.6,
+    "quality_pass": true,
+    "unique_colors": 178671.0,
+    "input_variance": 3.53,
+    "spatial_stddev": 41.8,
+    "transform_diff": 60.73,
+    "edge_strength": 71.45,
+    "status": "success"
+  }
+]

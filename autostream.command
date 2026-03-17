@@ -1,10 +1,15 @@
 #!/bin/bash
 # ============================================================
 # autostream — Sonnet experiments → Opus review rotation
-# ダブルクリックで起動
+# ダブルクリックで起動 or SSH: nohup bash autostream.command &
 # ============================================================
 export PATH="$HOME/.local/node/bin:$PATH"
 cd "$(dirname "$0")"
+
+# Load API key from .env (not committed to git)
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs)
+fi
 
 SONNET_MINUTES=30
 SONNET_TIMEOUT=$((SONNET_MINUTES * 60))
@@ -13,24 +18,24 @@ SONNET_TIMEOUT=$((SONNET_MINUTES * 60))
 if ! claude --version >/dev/null 2>&1; then
     echo "ERROR: claude CLI が見つかりません"
     echo "  → npm install -g @anthropic-ai/claude-code"
-    read -p "Press Enter to close..."
     exit 1
 fi
 
-LOGIN_CHECK=$(claude -p "echo ok" --allowedTools "" --model haiku 2>&1 | head -5)
-if echo "$LOGIN_CHECK" | grep -qi "not logged in\|login\|unauthorized\|authenticate"; then
-    echo "ERROR: Claude CLI にログインしていません"
-    echo "  → export PATH=\$HOME/.local/node/bin:\$PATH && claude /login"
-    read -p "Press Enter to close..."
+# Quick connectivity test
+CONN_CHECK=$(claude -p "echo ok" --allowedTools "" --model haiku 2>&1 | head -5)
+if echo "$CONN_CHECK" | grep -qi "error\|invalid\|unauthorized"; then
+    echo "ERROR: Claude API接続エラー"
+    echo "$CONN_CHECK"
     exit 1
 fi
+echo "  Claude CLI: connected"
 
 BRANCH=$(git branch --show-current 2>/dev/null || echo "autostream/mar16")
 echo "============================================================"
 echo "  autostream — Sonnet/Opus rotation"
 echo "  Branch: $BRANCH"
 echo "  Sonnet: ${SONNET_MINUTES}min experiments → Opus: review & plan"
-echo "  Stop: Ctrl+C or close this window"
+echo "  Stop: Ctrl+C or kill $$"
 echo "============================================================"
 echo ""
 
@@ -44,29 +49,33 @@ while true; do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    # macOS has no `timeout` — use background + sleep + kill
     claude -p "Read program.md thoroughly. You are on branch $BRANCH.
 
 results.tsv has all experiment history. The CoreML models are in coreml_models/. The Python venv is at .venv/bin/python.
 
-IMPORTANT: benchmark.py now includes QUALITY CHECKS. After speed measurement, it checks:
-- input_variance >= 2.0 (outputs must differ for different inputs)
-- unique_colors >= 100 (no solid-color outputs)
-- spatial_stddev >= 10.0 (output must have spatial structure)
-If quality_pass is false, the experiment MUST be treated as a crash/qfail.
+CRITICAL NEW FINDING: Channel-slimmed UNet models are available!
+- slim_30 [96,192,384]: 18.2ms/54.8FPS — BEST so far
+- slim_50 [160,320,640]: 21.5ms/46.6FPS
+- slim_80 [256,512,1024]: 28.9ms/34.6FPS
+All pass quality. Read slim_results.json for details.
 
-Check quality with: grep 'quality_pass:\|QUALITY_FAIL' run.log
+To use a slim model, change pipeline.py UNet loading:
+  unet_path = os.path.join(COREML_DIR, 'unet_sdxs_512_slim_30.mlpackage')
 
-Start the experiment loop NOW. Edit pipeline.py, run '.venv/bin/python benchmark.py > run.log 2>&1', check BOTH speed AND quality results, keep or discard. NEVER STOP. Run experiments until this session ends." \
+Your job: optimize pipeline.py using the slim_30 model as the default UNet.
+Then apply all pipeline-level optimizations on top (pre/post processing,
+buffer management, compute units, async operations).
+
+Quality gates in benchmark.py are mandatory. If quality_pass is false, revert.
+
+Start NOW. Edit pipeline.py, benchmark, iterate. NEVER STOP." \
         --allowedTools 'Edit,Read,Write,Bash,Glob,Grep' \
         --model sonnet 2>&1 | tee -a autostream.log &
     SONNET_PID=$!
 
-    # Wait for timeout or natural exit
     sleep $SONNET_TIMEOUT && kill $SONNET_PID 2>/dev/null &
     TIMER_PID=$!
 
-    # Wait for Sonnet to finish (either by timeout kill or natural completion)
     wait $SONNET_PID 2>/dev/null
     kill $TIMER_PID 2>/dev/null
     wait $TIMER_PID 2>/dev/null
@@ -77,41 +86,21 @@ Start the experiment loop NOW. Edit pipeline.py, run '.venv/bin/python benchmark
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    claude -p "You are the Opus reviewer for the autostream optimization project. Your job is to analyze what Sonnet did and plan the next round.
+    claude -p "You are the Opus reviewer. Read:
+1. results.tsv — experiment history
+2. pipeline.py — current state
+3. program.md — rules
+4. run.log — latest benchmark
+5. slim_results.json — channel-slimmed models
 
-Read these files:
-1. results.tsv — full experiment history
-2. pipeline.py — current pipeline state
-3. program.md — project rules and constraints
-4. run.log — latest benchmark output
-
-Then do the following:
-
-## Analysis
-- How many experiments were run this round?
-- What is the current best avg_ms and FPS?
-- Which experiments were kept vs discarded vs quality-failed?
-- Are there patterns in what works and what doesn't?
-
-## Quality Audit
-- Run the benchmark once yourself to verify: .venv/bin/python benchmark.py > run.log 2>&1
-- Check quality_pass. If quality is failing, fix pipeline.py to restore quality.
-- If the pipeline has drifted into degenerate territory (ignoring input, etc.), reset to a known-good state.
-
-## Strategy for Next Round
-- What optimization axes should Sonnet explore next?
-- Are there diminishing returns? Should we change approach?
-- Write a brief strategy note as the LAST line of results.tsv (as a comment starting with #).
-
-## Cleanup
-- Make sure results.tsv is clean and accurate
-- Commit any changes you made
-
-When done, output a brief summary of findings and next-round strategy." \
+Analyze, audit quality, plan next round strategy.
+Run benchmark yourself: .venv/bin/python benchmark.py > run.log 2>&1
+Commit any changes.
+Output brief summary." \
         --allowedTools 'Edit,Read,Write,Bash,Glob,Grep' \
         --model opus 2>&1 | tee -a autostream.log
 
     echo ""
-    echo "  Round $ROUND complete. Starting next round..."
+    echo "  Round $ROUND complete."
     sleep 5
 done
