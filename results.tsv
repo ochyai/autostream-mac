@@ -51,3 +51,6 @@ bbe71be	21.306	46.94	1525	keep	fp16c VAE enc+dec — VAE was bottleneck at 12.7m
 063f6b0	0.000	0.00	0	qfail	float16 _img_buf — input_variance=0.44 (fp16 precision loss in preprocessing)
 236439a	21.296	46.96	1525	discard	pal4 VAE enc+dec — no speed effect (same as fp16c on M3 Ultra)
 f847837	21.216	47.14	1519	discard	ALL compute units for slim_30 UNet — no improvement (same as CPU_AND_GPU)
+20ba6da	18.874	52.98	1492	keep	slim_15 UNet [64,96,192] — 18.9ms/53FPS, 2.4ms faster than slim_30
+5b46bc1	18.790	53.22	1490	discard	ALL compute for slim_15 — 0.08ms, below threshold (noise)
+9e38b90	18.801	53.18	1491	discard	FastPrediction+Infrequent hints on slim_15 — avg 0.07ms over 2 runs, below threshold
