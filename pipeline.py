@@ -138,8 +138,8 @@ class InferencePipeline:
         print(f"  Compute units: {COMPUTE_UNITS}")
 
         # Load CoreML models
-        enc_path = _ensure_vae_encoder(RENDER_SIZE, COREML_DIR)
-        dec_path = _ensure_vae_decoder(RENDER_SIZE, COREML_DIR)
+        enc_path = os.path.join(COREML_DIR, "taesd_encoder_512_fp16c.mlpackage")
+        dec_path = os.path.join(COREML_DIR, "taesd_decoder_fp16c.mlpackage")
         prefix = cfg["unet_prefix"]
         unet_path = os.path.join(COREML_DIR, f"{prefix}_slim_30.mlpackage")
         if not os.path.exists(unet_path):

@@ -46,4 +46,8 @@ cce2092	9.171	109.04	1993	keep	RENDER_SIZE=32 native enc (4x4 latent) + 4x4 UNet
 c93712f	9.208	108.60	1993	discard	ComputeUnit.ALL for 4x4 UNet — no improvement vs CPU_AND_GPU
 f477631	11.631	85.97	1991	discard	CPU_ONLY for 4x4 UNet — slower (GPU wins even for tiny models)
 27b6cba	9.180	108.93	1993	discard	FastPrediction+Infrequent optimization hints — no improvement vs baseline
-a1f3b82	22.201	45.04	1519	keep	slim_30 UNet [96,192,384] — 22ms/45FPS, 37% faster than 35ms baseline
+838df0b	22.201	45.04	1519	keep	slim_30 UNet [96,192,384] — 22ms/45FPS, 37% faster than 35ms baseline
+bbe71be	21.306	46.94	1525	keep	fp16c VAE enc+dec — VAE was bottleneck at 12.7ms, 0.9ms improvement
+063f6b0	0.000	0.00	0	qfail	float16 _img_buf — input_variance=0.44 (fp16 precision loss in preprocessing)
+236439a	21.296	46.96	1525	discard	pal4 VAE enc+dec — no speed effect (same as fp16c on M3 Ultra)
+f847837	21.216	47.14	1519	discard	ALL compute units for slim_30 UNet — no improvement (same as CPU_AND_GPU)
